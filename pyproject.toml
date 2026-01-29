@@ -1,0 +1,15 @@
+[project]
+name = "dionysus"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "chainlit",
+    "hephaestus",
+    "langgraph",
+    "pydantic",
+]
+
+[tool.uv.sources]
+hephaestus = { path = "../hephaestus", editable = true }
