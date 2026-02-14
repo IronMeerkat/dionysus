@@ -98,6 +98,6 @@ def spawn_npc(_name: str, _description: str) -> StateGraph:
     graph.add_edge("use_tools", "npc_narrator")
     graph.add_edge("npc_narrator", END)
 
-    planner = graph.compile()
+    planner = graph.compile(name=_name)
 
     return planner
