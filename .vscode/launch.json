@@ -6,11 +6,11 @@
     "configurations": [
 
         {
-            "name": "Chainlit: solo.py",
+            "name": "Chainlit: chat.py",
             "type": "python",
             "request": "launch",
             "module": "chainlit",
-            "args": ["run", "chat/solo.py", "--host", "0.0.0.0", "-w"],
+            "args": ["run", "chat/chat.py", "--host", "0.0.0.0", "-w"],
             "console": "integratedTerminal",
             "justMyCode": true
         }
