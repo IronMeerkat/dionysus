@@ -1,9 +1,17 @@
-from langgraph.graph import StateGraph
-from pydantic import BaseModel
-from typing import Annotated
-from langchain_core.messages import AnyMessage
 import operator
-from langgraph.graph import START, END
+from typing import Annotated
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel
+
+from database.postgres_connection import checkpointer
+
+
+class AgentSwarmState(BaseModel):
+    """🐝 Shared state flowing through every node in an agent swarm."""
+
+    messages: Annotated[list[AnyMessage], operator.add]
 
 
 def _resolve_agent(item: object) -> tuple[str, object]:
@@ -26,9 +34,6 @@ def create_agent_swarm(*agents: StateGraph | tuple[str, object]) -> object:
     if len(resolved) == 1:
         _, agent = resolved[0]
         return agent
-
-    class AgentSwarmState(BaseModel):
-        messages: Annotated[list[AnyMessage], operator.add]
 
     graph = StateGraph[AgentSwarmState, None, AgentSwarmState, AgentSwarmState](AgentSwarmState)
 

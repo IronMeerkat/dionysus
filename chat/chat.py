@@ -12,8 +12,8 @@ from hephaestus.langfuse_handler import langfuse_callback_handler
 from agents.agent_swarm import create_agent_swarm
 from agents.nonplayer import spawn_npc
 from assistant import stream_npc_assistant
-from utils.prompts import npc_prompt
-
+from database.models import Player, Character
+from database.postgres_connection import session
 
 logger = getLogger(__name__)
 
@@ -29,21 +29,22 @@ async def on_start():
     # Then use character.name, character.description, etc.
     # ========================================
 
-    character_name = "Xaria"
 
-    # Create swarm consisting of Xaria
-    xaria = spawn_npc("Xaria", npc_prompt)
-    swarm = create_agent_swarm((character_name, xaria))
+    character = session.get(Character, 1)
+    player = session.get(Player, 2)
+
+    char_agent = spawn_npc(character.name, character.description, player.description)
+    swarm = create_agent_swarm((character.name, char_agent))
 
     # Store agent in user session
     cl.user_session.set("npc_agent", swarm)
     cl.user_session.set("message_history", [])
-    cl.user_session.set("character_name", character_name)
+    cl.user_session.set("character_name", character.name)
 
-    logger.info(f"🎭 Spawned NPC: {character_name}")
+    logger.info(f"🎭 Spawned NPC: {character.name}")
 
     await cl.Message(
-        content=f"🎭 **{character_name}** has entered the scene."
+        content=f"🎭 **{character.name}** has entered the scene."
     ).send()
 
 

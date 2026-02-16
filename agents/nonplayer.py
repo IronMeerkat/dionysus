@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from hephaestus.langfuse_handler import langfuse, langfuse_callback_handler
 
 from tools.dice import roll_d20, roll_d10, roll_d6
-from utils.prompts import plan_prompt_template, tool_prompt_template, narrator_prompt_template, player_prompt
+from utils.prompts import plan_prompt_template, tool_prompt_template, narrator_prompt_template
 
 logger = getLogger(__name__)
 
@@ -29,11 +29,11 @@ model = ChatXAI(
 tools = [roll_d20, roll_d10, roll_d6]
 tools_by_name = {tool.name: tool for tool in tools}
 
-def spawn_npc(_name: str, _description: str) -> StateGraph:
+def spawn_npc(_name: str, _description: str, _player_description: str) -> StateGraph:
 
     class NPCState(BaseModel):
         messages: Annotated[list[AnyMessage], operator.add]
-        player: str = player_prompt
+        player: str = _player_description
         name: str = _name
         description: str = _description
         thoughts: str = ''
