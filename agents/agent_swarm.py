@@ -2,6 +2,7 @@ import operator
 from typing import Annotated
 
 from langchain_core.messages import AnyMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
@@ -23,6 +24,32 @@ def _resolve_agent(item: object) -> tuple[str, object]:
     return (name, agent)
 
 
+def _wrap_agent_return_delta(agent: object) -> object:
+    """Wrap an agent so it returns only the messages it added (delta), not the full list.
+
+    Child agents return their full accumulated messages. With operator.add, the swarm
+    would concatenate that with its current state, duplicating all prior messages.
+    This wrapper extracts only the new messages the agent produced.
+    """
+
+    def wrapper(state: AgentSwarmState, config: RunnableConfig | None = None) -> dict:
+        state_dict = (
+            state.model_dump() if hasattr(state, "model_dump") else dict(state)
+        )
+        input_messages = state_dict.get("messages", [])
+        invoke_config = config if config is not None else {}
+        result = agent.invoke(state_dict, invoke_config)
+        result_dict = (
+            result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        )
+        output_messages = result_dict.get("messages", [])
+        n = len(input_messages)
+        delta = output_messages[n:] if n <= len(output_messages) else []
+        return {"messages": delta}
+
+    return wrapper
+
+
 def create_agent_swarm(*agents: StateGraph | tuple[str, object]) -> object:
     """
     Create a swarm from one or more agents.
@@ -38,7 +65,7 @@ def create_agent_swarm(*agents: StateGraph | tuple[str, object]) -> object:
     graph = StateGraph[AgentSwarmState, None, AgentSwarmState, AgentSwarmState](AgentSwarmState)
 
     for name, agent in resolved:
-        graph.add_node(name, agent)
+        graph.add_node(name, _wrap_agent_return_delta(agent))
 
     node_names = [START, *[n for n, _ in resolved], END]
 
