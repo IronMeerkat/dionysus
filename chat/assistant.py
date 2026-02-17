@@ -50,7 +50,7 @@ def _resolve_speaker(
     node = metadata.get("langgraph_node")
     if node and node in graph_node_to_character_name:
         return graph_node_to_character_name[node]
-    return None
+    raise ValueError("Could not determine which character is speaking. Please try again.", metadata, graph_node_to_character_name, path_from_namespace)
 
 
 def _path_from_namespace(namespace: tuple[str, ...]) -> list[str]:
@@ -77,8 +77,7 @@ async def stream_npc_assistant(
     mapping = cl.user_session.get("graph_node_to_character_name") or {}
     planner_steps: dict[str, cl.Step] = {}
     tool_steps: dict[str, cl.Step] = {}
-    current_answer: cl.Message | None = None
-    current_author: str | None = None
+    current_answer: cl.Message = cl.Message(content="")
 
     def _step_for_speaker(steps: dict[str, cl.Step], label: str, speaker: str) -> cl.Step:
         if speaker not in steps:
@@ -97,26 +96,15 @@ async def stream_npc_assistant(
         node_name = _effective_node(metadata, path_from_ns)
 
         if isinstance(msg, (AIMessageChunk, AIMessage)):
-            # Narrator output: npc_narrator (single-agent) or character_X (multi-agent swarm)
+            speaker = _resolve_speaker(metadata, mapping, path_from_ns)
+            if current_answer.author != speaker:
+                current_answer = cl.Message(content="", author=speaker)
             is_narrator = node_name == NODE_NARRATOR or (
                 node_name and node_name in mapping
             )
+
             if is_narrator:
-                speaker = _resolve_speaker(metadata, mapping, path_from_ns)
-                if speaker is None:
-                    logger.error(
-                        f"❌ Cannot resolve speaker for narrator output: "
-                        f"metadata={metadata}, mapping={list(mapping.keys())}"
-                    )
-                    await cl.Message(
-                        content="❌ Could not determine which character is speaking. Please try again."
-                    ).send()
-                    return
-                if current_answer is None or current_author != speaker:
-                    if current_answer is not None:
-                        await current_answer.send()
-                    current_answer = cl.Message(content="", author=speaker)
-                    current_author = speaker
+                current_answer.author = speaker
                 await current_answer.stream_token(msg.content)
             elif node_name == NODE_PLANNER:
                 speaker = _resolve_speaker(metadata, mapping, path_from_ns) or "Unknown"
