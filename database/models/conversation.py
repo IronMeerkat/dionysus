@@ -166,12 +166,11 @@ class Conversation(Base):
         Returns:
             The newly created Message instance.
         """
-        with session.begin():
-            msg = Message(role=role, content=content, speaker_name=speaker_name)
-            self.messages.append(msg)
-            session.add(msg)
-            session.add(self)
-            session.flush()
+        msg = Message(role=role, content=content, speaker_name=speaker_name)
+        self.messages.append(msg)
+        session.add(msg)
+        session.add(self)
+        session.commit()
         logger.info(
             f"💬 [{role}] message added to conversation {self.id} "
             f"(speaker={speaker_name})"
@@ -200,13 +199,12 @@ class Conversation(Base):
     @classmethod
     def create(cls, player: Player, characters: list[Character]) -> "Conversation":
         """🎭 Create a new conversation between a player and one or more characters."""
-        with session.begin():
-            conversation = cls(player=player)
-            for character in characters:
-                conversation.add_character(character)
-            conversation.title = f"{player.name} {', '.join([c.name for c in characters])}"
-            session.add(conversation)
-            session.flush()
+        conversation = cls(player=player)
+        for character in characters:
+            conversation.add_character(character)
+        conversation.title = f"{player.name} {', '.join([c.name for c in characters])}"
+        session.add(conversation)
+        session.commit()
         return conversation
 
     def __repr__(self) -> str:
