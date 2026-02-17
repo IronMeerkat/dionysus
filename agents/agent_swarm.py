@@ -33,18 +33,13 @@ def _wrap_agent_return_delta(agent: object) -> object:
     """
 
     def wrapper(state: AgentSwarmState, config: RunnableConfig | None = None) -> dict:
-        state_dict = (
-            state.model_dump() if hasattr(state, "model_dump") else dict(state)
-        )
-        input_messages = state_dict.get("messages", [])
+
         invoke_config = config if config is not None else {}
-        result = agent.invoke(state_dict, invoke_config)
-        result_dict = (
-            result.model_dump() if hasattr(result, "model_dump") else dict(result)
-        )
-        output_messages = result_dict.get("messages", [])
-        n = len(input_messages)
-        delta = output_messages[n:] if n <= len(output_messages) else []
+        result = agent.invoke({"messages": state.messages}, invoke_config)
+        output_messages = result['messages']
+        len_input = len(state.messages)
+        len_output = len(output_messages)
+        delta = output_messages[len_input:] if len_input <= len_output else []
         return {"messages": delta}
 
     return wrapper
