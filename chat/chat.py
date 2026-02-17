@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from hephaestus.logging import init_logger
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
-from assistant import stream_npc_assistant
+from stream_handler import NPCStreamHandler
 from services import build_swarm, load_participants
 from wizards import ask_characters, ask_player
 from database.models import Conversation
@@ -81,7 +81,7 @@ async def on_message(cl_message: cl.Message):
     💬 Handle incoming messages and get NPC response.
     """
     npc_agent = cl.user_session.get("npc_agent")
-    character_name = cl.user_session.get("character_name")
+    # character_name = cl.user_session.get("character_name")
 
     if not npc_agent:
         logger.error("❌ No NPC agent found in session!")
@@ -93,15 +93,18 @@ async def on_message(cl_message: cl.Message):
     runnable_config = RunnableConfig(callbacks=callbacks, **config)
 
     try:
-        character_ids = cl.user_session.get("character_ids") or []
-        use_subgraphs = len(character_ids) > 1
         stream = npc_agent.stream(
             {"messages": [HumanMessage(content=cl_message.content)]},
             stream_mode="messages",
             config=runnable_config,
-            subgraphs=use_subgraphs,
+            subgraphs=True,
         )
-        await stream_npc_assistant(character_name, stream, subgraphs=use_subgraphs)
+
+        mapping = cl.user_session.get("graph_node_to_character_name", {})
+        if not mapping:
+            logger.warning("❌ No mapping found in session!")
+        handler = NPCStreamHandler(mapping)
+        await handler.process(stream)
     except Exception as exc:
         logger.exception(f"❌ Stream error: {exc}")
         await cl.Message(

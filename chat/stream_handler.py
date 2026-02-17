@@ -55,14 +55,15 @@ class NPCStreamHandler:
         async with step as s:
             await s.stream_token(msg.content)
 
-    async def process(self, stream: object, subgraphs: bool) -> None:
+    async def process(self, stream: object) -> None:
         """Process stream items and render to Chainlit."""
         for item in stream:
-            if subgraphs and isinstance(item, tuple) and len(item) == 2:
+            if isinstance(item, tuple) and len(item) == 2:
                 namespace, payload = item
                 msg, metadata = payload
                 path_from_ns = path_from_namespace(namespace) if isinstance(namespace, tuple) else None
             else:
+                logger.warning(f"❓ Non-tuple stream item: {item}")
                 msg, metadata = item
                 path_from_ns = None
 
