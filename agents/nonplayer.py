@@ -85,6 +85,10 @@ def spawn_npc(_name: str, _description: str, _player_description: str) -> StateG
         prompt = narrator_prompt_template.invoke(state.model_dump(exclude={'player'}))
 
         response = model.invoke(prompt)
+        if not response.content.startswith(f"**{_name}**: "):
+            response.content = f"**{_name}**: {response.content}"
+        response.name = _name
+        response.id = str(uuid4())
         return {'messages': [response]}
 
     graph = StateGraph(NPCState)

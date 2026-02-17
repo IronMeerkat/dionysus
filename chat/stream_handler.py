@@ -32,7 +32,7 @@ class NPCStreamHandler:
     ) -> None:
         speaker = resolve_speaker(metadata, self.mapping, path_from_ns)
         if self.current_answer.author != speaker:
-            self.current_answer = cl.Message(content=f"{speaker}:", author=speaker)
+            self.current_answer = cl.Message(content=f"", author=speaker)
         node_name = effective_node(metadata, path_from_ns)
         is_narrator = node_name == NODE_NARRATOR or (node_name and node_name in self.mapping)
 
