@@ -1,11 +1,11 @@
 from logging import getLogger
 
-
 import chainlit as cl
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from hephaestus.logging import init_logger
+init_logger()
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
 from stream_handler import NPCStreamHandler
@@ -13,7 +13,7 @@ from services import build_swarm, load_participants
 from wizards import ask_characters, ask_player
 from database.models import Conversation
 
-init_logger()
+
 logger = getLogger(__name__)
 
 @cl.on_chat_resume

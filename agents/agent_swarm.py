@@ -33,8 +33,8 @@ def _wrap_agent_return_delta(agent: object) -> object:
     """
 
     def wrapper(state: AgentSwarmState, config: RunnableConfig | None = None) -> dict:
-
-        invoke_config = config if config is not None else {}
+        invoke_config = dict(config) if config else {}
+        invoke_config["run_name"] = agent.name  # preserve character name in Langfuse when subgraph
         result = agent.invoke({"messages": state.messages}, invoke_config)
         output_messages = result['messages']
         len_input = len(state.messages)
@@ -54,8 +54,7 @@ def create_agent_swarm(*agents: StateGraph | tuple[str, object]) -> object:
     resolved = [_resolve_agent(a) for a in agents]
 
     if len(resolved) == 1:
-        _, agent = resolved[0]
-        return agent
+        return resolved[0][1]
 
     graph = StateGraph[AgentSwarmState, None, AgentSwarmState, AgentSwarmState](AgentSwarmState)
 
