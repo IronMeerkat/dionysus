@@ -22,6 +22,7 @@ model = ChatXAI(
     model="grok-4-1-fast-reasoning",
     temperature=1,
     callbacks=[langfuse_callback_handler],
+    max_retries=3,
 )
 
 

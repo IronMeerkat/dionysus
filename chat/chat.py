@@ -147,6 +147,10 @@ async def on_start():
     🚀 Initialize the chat session via Chainlit AskActionMessage wizard.
     """
     try:
+        if cl.user_session.get("conversation_id"):
+            logger.info("⏭️ Conversation already initialized; skipping setup prompts.")
+            return
+
         players, characters = _load_available_participants()
 
         if not players:
@@ -223,9 +227,18 @@ async def on_message(cl_message: cl.Message):
     callbacks = [cl.LangchainCallbackHandler(), langfuse_callback_handler]
     runnable_config = RunnableConfig(callbacks=callbacks, **config)
 
-    stream = npc_agent.stream(
-        {"messages": [HumanMessage(content=cl_message.content)]},
-        stream_mode="messages",
-        config=runnable_config,
-    )
-    await stream_npc_assistant(character_name, stream)
+    try:
+        character_ids = cl.user_session.get("character_ids") or []
+        use_subgraphs = len(character_ids) > 1
+        stream = npc_agent.stream(
+            {"messages": [HumanMessage(content=cl_message.content)]},
+            stream_mode="messages",
+            config=runnable_config,
+            subgraphs=use_subgraphs,
+        )
+        await stream_npc_assistant(character_name, stream, subgraphs=use_subgraphs)
+    except Exception as exc:
+        logger.exception(f"❌ Stream error: {exc}")
+        await cl.Message(
+            content="⚠️ The AI connection was interrupted. Please try sending your message again."
+        ).send()
