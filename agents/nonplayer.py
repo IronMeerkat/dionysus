@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from hephaestus.langfuse_handler import langfuse, langfuse_callback_handler
 
+from database.models import Character as CharacterModel, Player as PlayerModel
 from tools.dice import roll_d20, roll_d10, roll_d6
 from utils.prompts import plan_prompt_template, tool_prompt_template, narrator_prompt_template
 
@@ -20,7 +21,7 @@ logger = getLogger(__name__)
 
 model = ChatXAI(
     model="grok-4-1-fast-reasoning",
-    temperature=1,
+    temperature=0.9,
     callbacks=[langfuse_callback_handler],
     max_retries=3,
 )
@@ -30,13 +31,13 @@ model = ChatXAI(
 tools = [roll_d20, roll_d10, roll_d6]
 tools_by_name = {tool.name: tool for tool in tools}
 
-def spawn_npc(_name: str, _description: str, _player_description: str) -> StateGraph:
+def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
 
     class NPCState(BaseModel):
         messages: Annotated[list[AnyMessage], operator.add]
-        player: str = _player_description
-        name: str = _name
-        description: str = _description
+        player: str = _player.description
+        name: str = character.name
+        description: str = character.description
         thoughts: str = ''
 
     def planner(state: NPCState) -> NPCState:
@@ -85,9 +86,9 @@ def spawn_npc(_name: str, _description: str, _player_description: str) -> StateG
         prompt = narrator_prompt_template.invoke(state.model_dump(exclude={'player'}))
 
         response = model.invoke(prompt)
-        if not response.content.startswith(f"**{_name}**: "):
-            response.content = f"**{_name}**: {response.content}"
-        response.name = _name
+        if not response.content.startswith(f"**{character.name}**: "):
+            response.content = f"**{character.name}**: {response.content}"
+        response.name = character.name
         response.id = str(uuid4())
         return {'messages': [response]}
 
@@ -103,6 +104,6 @@ def spawn_npc(_name: str, _description: str, _player_description: str) -> StateG
     graph.add_edge("use_tools", "npc_narrator")
     graph.add_edge("npc_narrator", END)
 
-    planner = graph.compile(name=_name)
+    planner = graph.compile(name=character.name)
 
     return planner
