@@ -11,36 +11,10 @@ NODE_USE_TOOLS = "use_tools"
 NODE_NARRATOR = "npc_narrator"
 NARRATOR_NODES = frozenset({NODE_PLANNER, NODE_USE_TOOLS, NODE_NARRATOR})
 
-
-def effective_node(metadata: dict, path_from_namespace: list[str] | None = None) -> str | None:
-    """Resolve node name from metadata (supports nested graphs via langgraph_path)."""
-    inner_node = metadata.get("langgraph_node")
-    path = path_from_namespace or metadata.get("langgraph_path")
-    if inner_node and inner_node in NARRATOR_NODES:
-        return inner_node
-    return path[-1] if path else inner_node
-
-
-def resolve_speaker(
-    metadata: dict,
-    character_list: list[str],
-    path_from_namespace: list[str] | None = None,
-) -> str | None:
+def resolve_speaker(character_list: list[str], path: list[str]) -> str:
     """Resolve character name from stream metadata. Innermost path element wins."""
-    path = path_from_namespace or metadata.get("langgraph_path")
-    if path:
-        matching = [c for c in character_list if c in path]
-        if matching:
-            return matching[-1]
-    node = metadata.get("langgraph_node")
-    if node:
-        return node
-    raise ValueError(
-        "Could not determine which character is speaking. Please try again.",
-        metadata,
-        character_list,
-        path_from_namespace,
-    )
+    matching = [c for c in path if c in character_list]
+    return matching[-1]
 
 
 def path_from_namespace(namespace: tuple[str, ...]) -> list[str]:
