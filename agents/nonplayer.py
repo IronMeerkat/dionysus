@@ -12,7 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
 from hephaestus.langfuse_handler import langfuse, langfuse_callback_handler
-
+from database.initialize_mem0 import memory
 from database.models import Character as CharacterModel, Player as PlayerModel
 from tools.dice import roll_d20, roll_d10, roll_d6
 from utils.prompts import plan_prompt_template, tool_prompt_template, narrator_prompt_template
@@ -39,25 +39,41 @@ def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
         name: str = character.name
         description: str = character.description
         thoughts: str = ''
+        lore: str = ''
 
-    def planner(state: NPCState) -> NPCState:
+    async def memory_loader(state: NPCState) -> NPCState:
+        last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
+        lore = (await memory.search(
+            query=last_human_message.content,
+            user_id="user",
+            metadata_filters={"OR": [{"memory_category": "lore"}]},
+            rerank=True,
+        ))['results']
 
-        prompt = plan_prompt_template.invoke(state.model_dump(exclude={'thoughts'}))
+        lore = [m for m in lore if m['rerank_score'] > 0.6]
+        limit = min(20, len(lore))
+        lore = lore[:limit]
+
+        return {'lore': '\n'.join([m['memory'] for m in lore]), 'messages': []}
+
+    async def planner(state: NPCState) -> NPCState:
+
+        prompt = await plan_prompt_template.ainvoke(state.model_dump(exclude={'thoughts'}))
         logger.debug(f"🧠 Planner prompt: {prompt}")
 
-        response = model.invoke(prompt)
+        response = await model.ainvoke(prompt)
         logger.info(f"🧠 Planner response: {response.content[:200]}...")
         # Return empty messages list to prevent appending - operator.add with [] is a no-op
         return {'thoughts': response.content, 'messages': []}
 
-    def use_tools(state: NPCState) -> NPCState:
+    async def use_tools(state: NPCState) -> NPCState:
 
-        prompt = tool_prompt_template.invoke(state.model_dump(exclude={'player'}))
+        prompt = await tool_prompt_template.ainvoke(state.model_dump(exclude={'player', 'lore'}))
         logger.debug(f"🔧 Tool prompt: {prompt}")
 
         tool_model = model.bind_tools(tools)
 
-        tool_calls = tool_model.invoke(prompt)
+        tool_calls = await tool_model.ainvoke(prompt)
         logger.info(f"🔧 Tool response content: {tool_calls.content[:200] if tool_calls.content else 'None'}...")
 
         # Only add messages if tools were actually called
@@ -72,20 +88,20 @@ def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
 
         for tcall in tool_calls.tool_calls:
             tool = tools_by_name[tcall['name']]
-            result = tool.invoke(tcall['args'])
+            result = await tool.ainvoke(tcall['args'])
             logger.info(f"🎲 Tool {tcall['name']} result: {result}")
             results.append(ToolMessage(content=result, tool_call_id=tcall["id"]))
 
         return {'messages': results}
 
-    def should_continue(state: NPCState) -> NPCState:
+    async def should_continue(state: NPCState) -> NPCState:
         pass
 
-    def npc_narrator(state: NPCState) -> NPCState:
+    async def npc_narrator(state: NPCState) -> NPCState:
 
-        prompt = narrator_prompt_template.invoke(state.model_dump(exclude={'player'}))
+        prompt = await narrator_prompt_template.ainvoke(state.model_dump(exclude={'player'}))
 
-        response = model.invoke(prompt)
+        response = await model.ainvoke(prompt)
         if not response.content.startswith(f"**{character.name}**: "):
             response.content = f"**{character.name}**: {response.content}"
         response.name = character.name
@@ -93,11 +109,13 @@ def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
         return {'messages': [response]}
 
     graph = StateGraph(NPCState)
+    graph.add_node("memory_loader", memory_loader)
     graph.add_node("planner", planner)
     graph.add_node("use_tools", use_tools)
     # graph.add_node("should_continue", should_continue)
     graph.add_node("npc_narrator", npc_narrator)
-    graph.add_edge(START, "planner")
+    graph.add_edge(START, "memory_loader")
+    graph.add_edge("memory_loader", "planner")
     graph.add_edge("planner", "use_tools")
     # graph.add_edge("use_tools", "should_continue")
     # graph.add_edge("should_continue", "npc_narrator")
