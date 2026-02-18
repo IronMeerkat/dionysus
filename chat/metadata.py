@@ -23,22 +23,22 @@ def effective_node(metadata: dict, path_from_namespace: list[str] | None = None)
 
 def resolve_speaker(
     metadata: dict,
-    graph_node_to_character_name: dict[str, str],
+    character_list: list[str],
     path_from_namespace: list[str] | None = None,
 ) -> str | None:
     """Resolve character name from stream metadata. Innermost path element wins."""
     path = path_from_namespace or metadata.get("langgraph_path")
     if path:
-        matching = [graph_node_to_character_name[e] for e in path if e in graph_node_to_character_name]
+        matching = [c for c in character_list if c in path]
         if matching:
             return matching[-1]
     node = metadata.get("langgraph_node")
-    if node and node in graph_node_to_character_name:
-        return graph_node_to_character_name[node]
+    if node:
+        return node
     raise ValueError(
         "Could not determine which character is speaking. Please try again.",
         metadata,
-        graph_node_to_character_name,
+        character_list,
         path_from_namespace,
     )
 

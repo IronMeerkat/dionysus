@@ -10,7 +10,7 @@
             "type": "python",
             "request": "launch",
             "module": "chainlit",
-            "args": ["run", "chat/chat.py", "--host", "0.0.0.0", "-w"],
+            "args": ["run", "chat/chat.py", "--host", "0.0.0.0"], // "-w" for watch mode
             "console": "integratedTerminal",
             "justMyCode": true
         }

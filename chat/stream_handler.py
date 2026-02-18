@@ -16,8 +16,8 @@ logger = getLogger(__name__)
 class NPCStreamHandler:
     """Handles streaming NPC responses with character attribution and step rendering."""
 
-    def __init__(self, graph_node_to_character_name: dict[str, str]):
-        self.mapping = graph_node_to_character_name or {}
+    def __init__(self, character_list: list[str]):
+        self.character_list = character_list
         self.planner_steps: dict[str, cl.Step] = {}
         self.tool_steps: dict[str, cl.Step] = {}
         self.current_answer: cl.Message = cl.Message(content="")
@@ -30,17 +30,19 @@ class NPCStreamHandler:
     async def _handle_ai_message(
         self, msg: AIMessageChunk | AIMessage, metadata: dict, path_from_ns: list[str] | None
     ) -> None:
-        speaker = resolve_speaker(metadata, self.mapping, path_from_ns)
+        speaker = resolve_speaker(metadata, self.character_list, path_from_ns)
         if self.current_answer.author != speaker:
-            self.current_answer = cl.Message(content=f"", author=speaker)
+            self.current_answer = cl.Message(content="", author=speaker)
         node_name = effective_node(metadata, path_from_ns)
-        is_narrator = node_name == NODE_NARRATOR or (node_name and node_name in self.mapping)
+        is_narrator = node_name == NODE_NARRATOR or (node_name and node_name in self.character_list)
 
         if is_narrator:
+
+            # if isinstance(msg, AIMessage) and not isinstance(msg, AIMessageChunk):
+            #     return
             self.current_answer.author = speaker
             await self.current_answer.stream_token(msg.content)
         elif node_name == NODE_PLANNER:
-            speaker = resolve_speaker(metadata, self.mapping, path_from_ns)
             step = self._step_for_speaker(self.planner_steps, "🧠 Thinking", speaker)
             async with step as s:
                 await s.stream_token(msg.content)
@@ -50,7 +52,7 @@ class NPCStreamHandler:
     async def _handle_tool_message(
         self, msg: ToolMessageChunk | ToolMessage, metadata: dict, path_from_ns: list[str] | None
     ) -> None:
-        speaker = resolve_speaker(metadata, self.mapping, path_from_ns)
+        speaker = resolve_speaker(metadata, self.character_list, path_from_ns)
         step = self._step_for_speaker(self.tool_steps, "🔧 Using Tools", speaker)
         async with step as s:
             await s.stream_token(msg.content)
@@ -58,6 +60,7 @@ class NPCStreamHandler:
     async def process(self, stream: object) -> None:
         """Process stream items and render to Chainlit."""
         for item in stream:
+            namespace = None
             if isinstance(item, tuple) and len(item) == 2:
                 namespace, payload = item
                 msg, metadata = payload
@@ -67,14 +70,12 @@ class NPCStreamHandler:
                 msg, metadata = item
                 path_from_ns = None
 
-            if isinstance(msg, (AIMessageChunk, AIMessage)):
+            if isinstance(msg, AIMessageChunk):
                 await self._handle_ai_message(msg, metadata, path_from_ns)
-            elif isinstance(msg, (ToolMessageChunk, ToolMessage)):
+            elif isinstance(msg, ToolMessageChunk):
                 await self._handle_tool_message(msg, metadata, path_from_ns)
-            elif isinstance(msg, HumanMessage):
-                pass  # User input already shown by Chainlit
             else:
-                logger.warning(f"🚨 Unknown message type: {type(msg)} from node: {effective_node(metadata, path_from_ns)}")
+                logger.debug(f"Unhandled message type: {type(msg)}")
 
         if self.current_answer is not None:
             await self.current_answer.send()
