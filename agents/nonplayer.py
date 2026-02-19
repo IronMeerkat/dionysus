@@ -15,6 +15,7 @@ from hephaestus.langfuse_handler import langfuse, langfuse_callback_handler
 from database.initialize_mem0 import memory
 from database.models import Character as CharacterModel, Player as PlayerModel
 from tools.dice import roll_d20, roll_d10, roll_d6
+from tools import tabletop
 from utils.prompts import plan_prompt_template, tool_prompt_template, narrator_prompt_template
 
 logger = getLogger(__name__)
@@ -31,15 +32,33 @@ model = ChatXAI(
 tools = [roll_d20, roll_d10, roll_d6]
 tools_by_name = {tool.name: tool for tool in tools}
 
-def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
+def spawn_npc(character: CharacterModel) -> StateGraph:
+
+    other_characters = [f"**{c.name}**:\n{c.description}" 
+                        for c in tabletop.characters 
+                        if c.id != character.id]
+
+    # other_character_names = [c.name for c in tabletop.characters if c.id != character.id]
+    # other_character_names = ', '.join(other_character_names)
+
+    other_characters = '\n\n\n'.join(other_characters)
+
 
     class NPCState(BaseModel):
         messages: Annotated[list[AnyMessage], operator.add]
-        player: str = _player.description
-        name: str = character.name
-        description: str = character.description
         thoughts: str = ''
         lore: str = ''
+
+        @property
+        def combined_dump(self) -> dict:
+            return {
+                'name': character.name,
+                'description': character.description,
+                'other_characters': other_characters,
+                'player': tabletop.player.description,
+                'location': tabletop.location,
+                **self.model_dump(),
+            }
 
     async def memory_loader(state: NPCState) -> NPCState:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
@@ -58,7 +77,7 @@ def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
 
     async def planner(state: NPCState) -> NPCState:
 
-        prompt = await plan_prompt_template.ainvoke(state.model_dump(exclude={'thoughts'}))
+        prompt = await plan_prompt_template.ainvoke(state.combined_dump)
         logger.debug(f"🧠 Planner prompt: {prompt}")
 
         response = await model.ainvoke(prompt)
@@ -68,7 +87,7 @@ def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
 
     async def use_tools(state: NPCState) -> NPCState:
 
-        prompt = await tool_prompt_template.ainvoke(state.model_dump(exclude={'player', 'lore'}))
+        prompt = await tool_prompt_template.ainvoke(state.combined_dump)
         logger.debug(f"🔧 Tool prompt: {prompt}")
 
         tool_model = model.bind_tools(tools)
@@ -99,7 +118,7 @@ def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
 
     async def npc_narrator(state: NPCState) -> NPCState:
 
-        prompt = await narrator_prompt_template.ainvoke(state.model_dump(exclude={'player'}))
+        prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
 
         response = await model.ainvoke(prompt)
         if not response.content.startswith(f"**{character.name}**: "):
@@ -122,6 +141,4 @@ def spawn_npc(character: CharacterModel, _player: PlayerModel) -> StateGraph:
     graph.add_edge("use_tools", "npc_narrator")
     graph.add_edge("npc_narrator", END)
 
-    planner = graph.compile(name=character.name)
-
-    return planner
+    return graph.compile(name=character.name)

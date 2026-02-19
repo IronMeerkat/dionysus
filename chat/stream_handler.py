@@ -50,7 +50,7 @@ class NPCStreamHandler:
 
     async def process(self, stream: object) -> None:
         """Process stream items and render to Chainlit."""
-        for item in stream:
+        async for item in stream:
             namespace, (msg, metadata) = item
             ns_path = path_from_namespace(namespace)
             langgraph_node = metadata["langgraph_node"]

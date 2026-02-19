@@ -9,7 +9,7 @@ init_logger()
 from hephaestus.agent_architectures import create_daisy_chain
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
-from agents.nonplayer import spawn_npc
+from agents.dungeon_master import spawn_dungeon_master
 from stream_handler import NPCStreamHandler
 from wizards import ask_characters, ask_player
 from database.models import Conversation
@@ -51,19 +51,15 @@ async def on_start():
         selected_characters = await ask_characters(characters)
 
         character_list = [c.name for c in selected_characters]
-        conversation = Conversation.create(player, selected_characters)
-        agents = [spawn_npc(c, player) for c in selected_characters]
-        swarm = create_daisy_chain(*agents, name="npc_swarm")
+        dungeon_master = spawn_dungeon_master(*selected_characters, player=player)
 
         character_names = ", ".join(character_list)
 
-        cl.user_session.set("npc_agent", swarm)
+        cl.user_session.set("dungeon_master", dungeon_master)
         cl.user_session.set("message_history", [])
-        cl.user_session.set("conversation_id", conversation.id)
         cl.user_session.set("player_id", player.id)
         cl.user_session.set("character_list", character_list)
 
-        logger.info(f"🎬 Conversation {conversation.id} created: player={player.name}, characters=[{character_names}]")
         await cl.Message(
             content=f"🎬 New conversation ready!\n🎮 Player: **{player.name}**\n🎭 Characters: **{character_names}**"
         ).send()
@@ -84,9 +80,9 @@ async def on_message(cl_message: cl.Message):
     """
     💬 Handle incoming messages and get NPC response.
     """
-    npc_agent = cl.user_session.get("npc_agent")
+    dungeon_master = cl.user_session.get("dungeon_master")
 
-    if not npc_agent:
+    if not dungeon_master:
         logger.error("❌ No NPC agent found in session!")
         await cl.Message(content="❌ Error: No character loaded. Please restart the chat.").send()
         return
@@ -95,7 +91,7 @@ async def on_message(cl_message: cl.Message):
     runnable_config = RunnableConfig(callbacks=[langfuse_callback_handler], **config)
 
     try:
-        stream = npc_agent.stream(
+        stream = dungeon_master.astream(
             {"messages": [HumanMessage(content=cl_message.content)]},
             stream_mode="messages",
             config=runnable_config,

@@ -14,5 +14,11 @@
         "**/*.pyc": true,
         ".python-version": true,
         "uv.lock": true,
-    }
+        "alembic.ini": true,
+        "alembic/env.py": true,
+
+    },
+    "cursorpyright.analysis.extraPaths": [
+        "../hephaestus/src"
+    ]
 }
