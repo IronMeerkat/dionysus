@@ -32,7 +32,7 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
 
 
     async def update_tabletop_messages(state: DungeonMasterState) -> DungeonMasterState:
-        tabletop.messages = state.messages
+        tabletop.messages.extend(state.messages)
         return {'messages': []}
 
     graph = StateGraph(DungeonMasterState)

@@ -57,7 +57,8 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
                 'other_characters': other_characters,
                 'player': tabletop.player.description,
                 'location': tabletop.location,
-                **self.model_dump(),
+                'messages': [*tabletop.messages, *self.messages],
+                **self.model_dump(exclude={'messages'}),
             }
 
     async def memory_loader(state: NPCState) -> NPCState:
