@@ -3,8 +3,10 @@ from logging import getLogger
 
 from langchain_core.messages import AnyMessage
 
+from hephaestus.settings import settings
 
 from database.models import Player, Character
+from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = getLogger(__name__)
 
@@ -24,6 +26,8 @@ class TableTop(metaclass=Singleton):
     characters: list[Character] = field(default_factory=list)
 
     messages: list[AnyMessage] = field(default_factory=list)
-    location: str = ''
+    location: str = placeholder_location
+    story_background: str = placeholder_scenario
+    lore_world: str = settings.PLACEHOLDER_LORE_WORLD   
 
 tabletop = TableTop()

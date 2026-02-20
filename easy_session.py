@@ -1,11 +1,40 @@
+import asyncio
+from logging import getLogger
+
 from hephaestus.logging import init_logger
 init_logger()
+from database.initialize_mem0 import memory
 from database.postgres_connection import session
 from database.models import Player, Character
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
 from agents.dungeon_master import spawn_dungeon_master
 from langchain_core.messages import HumanMessage
+
+logger = getLogger(__name__)
+
+
+async def wipe_agent_memories(agent_name: str) -> int:
+    """Deletes all memories with metadata `memory_category=memories` for the given agent name.
+
+    Returns the number of memories deleted.
+    """
+    all_memories = await memory.get_all(
+        user_id="user",
+        filters={"AND": [{"memory_category": "memories"}, {"agent": agent_name}]},
+        limit=10_000,
+    )
+
+    results = all_memories.get("results", [])
+    if not results:
+        logger.info(f"🗑️ No memories found for agent '{agent_name}'")
+        return 0
+
+    logger.info(f"🗑️ Deleting {len(results)} memories for agent '{agent_name}'...")
+    tasks = [asyncio.create_task(memory.delete(m["id"])) for m in results]
+    await asyncio.gather(*tasks)
+    logger.info(f"✅ Successfully wiped {len(results)} memories for agent '{agent_name}'")
+    return len(results)
 
 
 class EasySession:
