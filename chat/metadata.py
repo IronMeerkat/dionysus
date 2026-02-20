@@ -13,6 +13,9 @@ NARRATOR_NODES = frozenset({NODE_PLANNER, NODE_USE_TOOLS, NODE_NARRATOR})
 
 def resolve_speaker(character_list: list[str], path: list[str]) -> str:
     """Resolve character name from stream metadata. Innermost path element wins."""
+    if len(character_list) == 1:
+        return character_list[0]
+    
     matching = [c for c in path if c in character_list]
     return matching[-1]
 

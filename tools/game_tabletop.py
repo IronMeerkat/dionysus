@@ -28,6 +28,6 @@ class TableTop(metaclass=Singleton):
     messages: list[AnyMessage] = field(default_factory=list)
     location: str = placeholder_location
     story_background: str = placeholder_scenario
-    lore_world: str = settings.PLACEHOLDER_LORE_WORLD   
+    lore_world: str = settings.PLACEHOLDER_LORE_WORLD
 
 tabletop = TableTop()
