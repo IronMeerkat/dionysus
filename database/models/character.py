@@ -121,6 +121,12 @@ class Character(Base):
         """📚 Return the full ordered history of descriptions."""
         return list(self.description_versions)
 
+    @classmethod
+    def exists(cls, name: str) -> bool:
+        """Check if a character with this name exists."""
+        from database.postgres_connection import session
+        return session.query(cls).filter(cls.name == name).first() is not None
+
     def __repr__(self) -> str:
         return f"<Character(id={self.id}, name='{self.name}', desc_v={self.description_version})>"
 

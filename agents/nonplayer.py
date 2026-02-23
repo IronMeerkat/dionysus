@@ -29,7 +29,7 @@ class Oligaton(type(BaseModel)):
         return cls._instances[cache_key]
 
 
-def get_model(model: str = "grok-4-1-fast-non-reasoning", temperature: float = 1, max_retries: int = 3,**kwargs) -> ChatXAI:
+def get_model(model: str = "grok-4-1-fast-reasoning", temperature: float = 1, max_retries: int = 3,**kwargs) -> ChatXAI:
     return ChatXAI(model=model, temperature=temperature, max_retries=max_retries, **kwargs)
 
 model = get_model()
@@ -60,7 +60,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
 
     other_characters = '\n\n\n'.join(other_characters)
 
-    emotional_state_model = get_model(temperature=0.3).with_structured_output(EmotionalState.model_json_schema(), strict=True)
+    emotional_state_model = get_model(model= "grok-4-1-fast-non-reasoning", temperature=0.3).with_structured_output(EmotionalState.model_json_schema(), strict=True)
 
     emotional_state = EmotionalState(_key=character.name)
     class NPCState(BaseModel):
@@ -96,7 +96,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
             rerank=True,
         ))['results']
 
-        lore = [m for m in lore if m['rerank_score'] > 0.6]
+        lore = [m for m in lore if m['rerank_score'] > 0.3]
         limit = min(20, len(lore))
         lore = lore[:limit]
 
@@ -111,7 +111,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
             rerank=True,
         ))['results']
 
-        memories = [m for m in memories if m['rerank_score'] > 0.4]
+        memories = [m for m in memories if m['rerank_score'] > 0.3]
         limit = min(20, len(memories))
         memories = memories[:limit]
 

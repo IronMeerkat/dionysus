@@ -40,6 +40,7 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
 
     tabletop.player = player
     tabletop.characters = characters
+    tabletop.create_conversation()
 
     npc_swarm = create_daisy_chain(*[spawn_npc(c) for c in characters], name="npc_swarm")
 
@@ -84,10 +85,15 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
             logger.debug("🔄 No scene change detected, continuing...")
             tabletop.messages.extend(state.messages)
 
+        
+
         for message in tabletop.messages:
             if message.id is None:
                 message.id = str(uuid4())
             message.role = message.type
+
+        for message in state.messages:
+            tabletop.conversation.add_message(message.role, message.content, message.name)
 
         return {'messages': []}
 

@@ -1,8 +1,11 @@
+import uuid
 from datetime import datetime, timezone
 from logging import getLogger
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table, Text
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import relationship
 
 from database.postgres_connection import Base, session
@@ -37,7 +40,11 @@ class Message(Base):
 
     __tablename__ = "messages"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
     conversation_id = Column(
         Integer, ForeignKey("conversations.id"), nullable=False, index=True
     )
@@ -155,7 +162,7 @@ class Conversation(Base):
         role: str,
         content: str,
         speaker_name: str | None = None,
-    ) -> "Message":
+    ) -> "Message | None":
         """💬 Append a new message to this conversation.
 
         Args:
@@ -164,18 +171,27 @@ class Conversation(Base):
             speaker_name: Optional display name (character / player).
 
         Returns:
-            The newly created Message instance.
+            The newly created Message instance, or None if skipped (duplicate UUID).
         """
         msg = Message(role=role, content=content, speaker_name=speaker_name)
         self.messages.append(msg)
         session.add(msg)
         session.add(self)
-        session.commit()
-        logger.info(
-            f"💬 [{role}] message added to conversation {self.id} "
-            f"(speaker={speaker_name})"
-        )
-        return msg
+        try:
+            session.commit()
+            logger.info(
+                f"💬 [{role}] message added to conversation {self.id} "
+                f"(speaker={speaker_name})"
+            )
+            return msg
+        except IntegrityError as exc:
+            session.rollback()
+            
+            if "duplicate key" in str(exc).lower() or "unique constraint" in str(exc).lower():
+                self.messages.remove(msg)
+                logger.warning(f"⚠️ Duplicate message UUID, skipping add (id={msg.id})")
+                return None
+            raise exc
 
     # ------------------------------------------------------------------
     # AgentSwarmState conversion

@@ -5,7 +5,7 @@ from langchain_core.messages import AnyMessage
 
 from hephaestus.settings import settings
 
-from database.models import Player, Character
+from database.models import Player, Character, Conversation
 from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = getLogger(__name__)
@@ -29,5 +29,11 @@ class TableTop(metaclass=Singleton):
     location: str = placeholder_location
     story_background: str = placeholder_scenario
     lore_world: str = settings.PLACEHOLDER_LORE_WORLD
+    conversation: Conversation = None
+
+    def create_conversation(self):
+        if self.conversation is None:
+            self.conversation = Conversation.create(self.player, self.characters)
+        return self.conversation
 
 tabletop = TableTop()

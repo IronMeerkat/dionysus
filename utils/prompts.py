@@ -13,6 +13,8 @@ tool_prompt_template = get_langchain_prompt("npc-tool")
 narrator_prompt_template = get_langchain_prompt("npc-narrator")
 emotions_prompt_template = get_langchain_prompt("npc-emotions")
 
+npc_creator_prompt_template = get_langchain_prompt("npc-creator")
+
 scene_change_prompt_template = get_langchain_prompt("did-scene-change")
 character_episodic_memory = langfuse.get_prompt("character-episodic-memory")
 

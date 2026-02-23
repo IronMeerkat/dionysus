@@ -7,7 +7,7 @@
 
         {
             "name": "Chainlit: chat.py",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "module": "chainlit",
             "args": ["run", "chat/chat.py", "--host", "0.0.0.0"], // "-w" for watch mode
