@@ -8,9 +8,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
 
+from hephaestus.helpers import Oligaton
+
 from database.initialize_mem0 import memory
 from tools.game_tabletop import tabletop
-from tools.npc_management import check_npc_existence, create_character
+from tools.npc_management import create_character
 from utils.prompts import npc_creator_prompt_template
 
 logger = getLogger(__name__)

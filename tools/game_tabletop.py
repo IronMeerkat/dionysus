@@ -3,19 +3,13 @@ from logging import getLogger
 
 from langchain_core.messages import AnyMessage
 
+from hephaestus.helpers import Singleton
 from hephaestus.settings import settings
 
 from database.models import Player, Character, Conversation
 from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = getLogger(__name__)
-
-class Singleton(type):
-    _instances = {}
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
-        return cls._instances[cls]
 
 @dataclass
 class TableTop(metaclass=Singleton):

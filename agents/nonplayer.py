@@ -17,16 +17,6 @@ from utils.prompts import plan_prompt_template, narrator_prompt_template, emotio
 logger = getLogger(__name__)
 
 
-class Oligaton(type(BaseModel)):
-    """Metaclass that caches one instance per (class, key). Like Singleton but allows multiple instances keyed by the first arg."""
-    _instances: dict = {}
-    # TODO dump this and the Singleton in hephaestus
-    def __call__(cls, *args, **kwargs):
-        
-        cache_key = (cls, kwargs.pop("_key"))
-        if cache_key not in cls._instances:
-            cls._instances[cache_key] = super().__call__(*args, **kwargs)
-        return cls._instances[cache_key]
 
 
 def get_model(model: str = "grok-4-1-fast-reasoning", temperature: float = 1, max_retries: int = 3,**kwargs) -> ChatXAI:
