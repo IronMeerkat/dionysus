@@ -1,0 +1,59 @@
+@reference "../index.css";
+
+.navbar {
+  @apply flex items-center justify-between border-b border-base-content/10 bg-base-100 px-6 py-3;
+}
+
+.navbar-left {
+  @apply flex items-center gap-3;
+}
+
+.navbar-sidebar-toggle {
+  @apply flex items-center justify-center rounded-lg border-0 bg-transparent p-1 text-lg text-base-content/60 transition-colors hover:text-base-content;
+}
+
+@media (min-width: 768px) {
+  .navbar-sidebar-toggle {
+    display: none;
+  }
+}
+
+.navbar-title {
+  @apply text-xl font-bold tracking-tight;
+}
+
+.navbar-links-desktop {
+  @apply flex items-center gap-4;
+}
+
+@media (max-width: 767px) {
+  .navbar-links-desktop {
+    display: none;
+  }
+}
+
+.navbar-link {
+  @apply cursor-pointer text-sm font-medium text-base-content/60 transition-colors hover:text-base-content;
+}
+
+.navbar-menu-mobile {
+  @apply relative;
+}
+
+@media (min-width: 768px) {
+  .navbar-menu-mobile {
+    display: none;
+  }
+}
+
+.navbar-hamburger {
+  @apply flex items-center justify-center rounded-lg border-0 bg-transparent p-1 text-xl text-base-content/60 transition-colors hover:text-base-content;
+}
+
+.navbar-dropdown {
+  @apply absolute right-0 top-full z-50 mt-2 min-w-[10rem] rounded-lg border border-base-content/10 bg-base-100 py-1 shadow-lg;
+}
+
+.navbar-dropdown-item {
+  @apply block w-full cursor-pointer px-4 py-2 text-left text-sm font-medium text-base-content/70 transition-colors hover:bg-base-200 hover:text-base-content;
+}

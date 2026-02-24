@@ -1,0 +1,27 @@
+@reference "../index.css";
+
+.chat-layout {
+  @apply flex flex-1 flex-col overflow-hidden;
+}
+
+@media (min-width: 768px) {
+  .chat-layout {
+    @apply grid grid-cols-[256px_1fr];
+  }
+}
+
+.chat-main {
+  @apply flex flex-1 flex-col overflow-hidden;
+}
+
+.chat-messages-scroll {
+  @apply flex-1 overflow-y-auto px-4 py-6;
+}
+
+.chat-messages-list {
+  @apply mx-auto flex max-w-3xl flex-col gap-2;
+}
+
+.chat-empty-state {
+  @apply py-20 text-center text-base-content/40;
+}

@@ -3,7 +3,7 @@ from typing import Annotated
 import operator
 from uuid import uuid4
 from pydantic import BaseModel, Field
-from langchain_core.messages import AnyMessage
+from langchain_core.messages import AnyMessage, HumanMessage, AIMessage  
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_xai import ChatXAI
 from langgraph.graph import END, START, StateGraph
@@ -50,22 +50,33 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
 
     async def update_tabletop_messages(state: DungeonMasterState) -> DungeonMasterState:
 
-        scene_change = False
 
-        if len(tabletop.messages) > len(tabletop.characters) * 3:
-            prompt = await scene_change_prompt_template.ainvoke({"messages": state.messages})
-            result = await scene_change_model.ainvoke(prompt)
+        for message in state.messages:
+            if message.id is None:
+                message.id = str(uuid4())
 
-            logger.info(f"🔄 Scene changed: {result}")
+            if isinstance(message, HumanMessage):
+                message.name = player.name
+                message.role = "user"
+            elif isinstance(message, AIMessage):
+                message.role = "assistant"
 
-            if result is None or result.scene_changed is None:
-                logger.error("🔄 scene_changed returned None or NoneType, presuming no scene change")
+        # scene_change = False
+
+        # if len(tabletop.messages) > len(tabletop.characters) * 3:
+        #     prompt = await scene_change_prompt_template.ainvoke({"messages": state.messages})
+        #     result = await scene_change_model.ainvoke(prompt)
+
+        #     logger.info(f"🔄 Scene changed: {result}")
+
+        #     if result is None or result.scene_changed is None:
+        #         logger.error("🔄 scene_changed returned None or NoneType, presuming no scene change")
                 
-            else:
-                scene_change = result.scene_changed
+        #     else:
+        #         scene_change = result.scene_changed
 
 
-        if scene_change:
+        if len(state.messages) % len(tabletop.characters) * 2 == 0:
             logger.info("🔄 Scene changed! Updating memories...")   
             tasks = [
                 asyncio.create_task(
@@ -85,15 +96,12 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
             logger.debug("🔄 No scene change detected, continuing...")
             tabletop.messages.extend(state.messages)
 
-        
-
-        for message in tabletop.messages:
-            if message.id is None:
-                message.id = str(uuid4())
-            message.role = message.type
 
         for message in state.messages:
-            tabletop.conversation.add_message(message.role, message.content, message.name)
+            tabletop.conversation.add_message(message.type, message.content, message.name)
+
+        # if len(tabletop.messages) > 12:
+        #     tabletop.messages = tabletop.messages[-6:]
 
         return {'messages': []}
 

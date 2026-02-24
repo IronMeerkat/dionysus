@@ -1,0 +1,70 @@
+@reference "../index.css";
+
+.session-setup {
+  @apply flex flex-1 items-center justify-center px-4;
+}
+
+.session-setup-card {
+  @apply w-full max-w-lg rounded-xl border border-base-content/10 bg-base-200 p-8 shadow-lg;
+}
+
+.session-setup-title {
+  @apply mb-6 text-center text-2xl font-bold text-base-content;
+}
+
+.session-setup-section {
+  @apply mb-6;
+}
+
+.session-setup-label {
+  @apply mb-2 block text-sm font-semibold text-base-content/70;
+}
+
+.session-setup-select {
+  @apply w-full;
+}
+
+.session-setup-characters {
+  @apply flex flex-col gap-2;
+}
+
+.session-setup-character-item {
+  @apply flex cursor-pointer items-center gap-3 rounded-lg border border-base-content/10 px-4 py-3 transition-colors;
+}
+
+.session-setup-character-item:hover {
+  @apply border-primary/40 bg-base-300;
+}
+
+.session-setup-character-item.selected {
+  @apply border-primary bg-primary/10;
+}
+
+.session-setup-character-check {
+  @apply checkbox checkbox-primary checkbox-sm;
+}
+
+.session-setup-character-name {
+  @apply text-sm font-medium text-base-content;
+}
+
+.session-setup-footer {
+  @apply mt-8 flex justify-end;
+}
+
+.session-setup-submit {
+  @apply text-blue-900;
+}
+
+.session-setup-submit:disabled {
+  @apply border border-base-content/10 bg-transparent text-base-content/25 cursor-not-allowed;
+  opacity: 1 !important;
+}
+
+.session-setup-error {
+  @apply mb-4 rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
+}
+
+.session-setup-loading {
+  @apply py-20 text-center text-base-content/40;
+}

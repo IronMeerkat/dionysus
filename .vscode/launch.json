@@ -13,6 +13,15 @@
             "args": ["run", "chat/chat.py", "--host", "0.0.0.0"], // "-w" for watch mode
             "console": "integratedTerminal",
             "justMyCode": true
+        },
+        {
+            "name": "API: Socket.IO Server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": ["api.main:socket_app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }

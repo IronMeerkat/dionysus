@@ -1,0 +1,63 @@
+@reference "../index.css";
+
+/* ── Mobile: full-screen overlay ── */
+@media (max-width: 767px) {
+  .chat-sidebar {
+    @apply fixed inset-0 z-40 flex -translate-y-full flex-col gap-4 bg-base-200 p-5 transition-transform duration-200 ease-in-out;
+  }
+
+  .chat-sidebar--open {
+    @apply translate-y-0;
+  }
+
+  .chat-sidebar-backdrop {
+    @apply fixed inset-0 z-30 bg-black/40;
+  }
+}
+
+/* ── Desktop: normal sidebar ── */
+@media (min-width: 768px) {
+  .chat-sidebar {
+    @apply flex flex-col gap-4 border-r border-base-content/10 bg-base-200 p-4;
+  }
+
+  .chat-sidebar-backdrop {
+    display: none;
+  }
+
+  .chat-sidebar-close {
+    display: none;
+  }
+}
+
+.chat-sidebar-header {
+  @apply flex items-center justify-between;
+}
+
+.chat-sidebar-title {
+  @apply text-lg font-semibold text-base-content/70;
+}
+
+.chat-sidebar-close {
+  @apply flex items-center justify-center rounded-lg border-0 bg-transparent p-1 text-lg text-base-content/60 transition-colors hover:text-base-content;
+}
+
+.chat-sidebar-section {
+  @apply flex flex-col gap-1;
+}
+
+.chat-sidebar-label {
+  @apply text-xs font-semibold uppercase tracking-wide text-base-content/40;
+}
+
+.chat-sidebar-value {
+  @apply text-sm font-medium text-base-content;
+}
+
+.chat-sidebar-character-list {
+  @apply flex flex-col gap-1;
+}
+
+.chat-sidebar-character-item {
+  @apply text-sm text-base-content/80;
+}

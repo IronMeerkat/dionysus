@@ -1,0 +1,28 @@
+@reference "../index.css";
+
+.message-input-bar {
+  @apply sticky bottom-0 bg-base-100/80 backdrop-blur-sm border-t border-base-content/10 px-4 py-3;
+}
+
+.message-input-inner {
+  @apply mx-auto flex max-w-3xl items-stretch gap-2;
+}
+
+.message-input-textarea {
+  @apply w-full resize-none leading-6 focus:outline-none;
+  max-height: calc(6 * 1.5rem);
+  overflow-y: auto;
+}
+
+.message-input-send {
+  @apply shrink-0 self-stretch text-blue-900;
+  height: auto !important;
+  min-width: 3rem;
+  min-height: 2.75rem;
+  touch-action: manipulation;
+}
+
+.message-input-send:disabled {
+  @apply border border-base-content/10 bg-transparent text-base-content/25 cursor-not-allowed;
+  opacity: 1 !important;
+}

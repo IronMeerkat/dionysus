@@ -8,6 +8,8 @@ from langchain_xai import ChatXAI
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
+from hephaestus.helpers import Oligaton
+
 from database.initialize_mem0 import memory
 from database.models import Character as CharacterModel
 from tools.dice import roll_d20, roll_d10, roll_d6
@@ -61,7 +63,9 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
 
         @property
         def combined_messages(self) -> list[AnyMessage]:
-            return [*tabletop.messages, *self.messages]
+            combo = [*tabletop.messages, *self.messages]
+            limit = min(12, len(combo))
+            return combo[-limit:]
 
         @property
         def combined_dump(self) -> dict:
@@ -86,8 +90,8 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
             rerank=True,
         ))['results']
 
-        lore = [m for m in lore if m['rerank_score'] > 0.3]
-        limit = min(20, len(lore))
+        lore = [m for m in lore if m['rerank_score'] > 0.7]
+        limit = min(7, len(lore))
         lore = lore[:limit]
 
         return {'lore': '\n'.join([m['memory'] for m in lore]), 'messages': []}
@@ -101,8 +105,8 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
             rerank=True,
         ))['results']
 
-        memories = [m for m in memories if m['rerank_score'] > 0.3]
-        limit = min(20, len(memories))
+        memories = [m for m in memories if m['rerank_score'] > 0.5]
+        limit = min(15, len(memories))
         memories = memories[:limit]
 
         return {'memories': '\n'.join([m['memory'] for m in memories]), 'messages': []}
@@ -141,9 +145,9 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
 
         prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
 
-        response = await get_model().ainvoke(prompt)
-        if not response.content.startswith(f"**{character.name}**: "):
-            response.content = f"**{character.name}**: {response.content}"
+        response = await get_model(top_p=0.7).ainvoke(prompt)
+        # if not response.content.startswith(f"**{character.name}**: "):
+        #     response.content = f"**{character.name}**: {response.content}"
         response.name = character.name
         response.id = str(uuid4())
         return {'messages': [response]}
