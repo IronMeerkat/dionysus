@@ -109,9 +109,21 @@ const SessionSetup = () => {
         />
 
         <div className="session-setup-section">
-          <input id="start-new-conversation" type="checkbox" checked={startNewConversation} onChange={() => setStartNewConversation(!startNewConversation)} />
+          <label
+              key="start-new-conversation"
+              className={`session-setup-character-item ${
+                startNewConversation ? "selected" : ""
+              }`}
+            >
+              <input
+                type="checkbox"
+                className="session-setup-character-check"
+                checked={startNewConversation}
+                onChange={() => setStartNewConversation(!startNewConversation)}
+              />
+              <span className="session-setup-character-name">Start new conversation</span>
+            </label>
 
-          <label htmlFor="start-new-conversation">   Start new conversation</label>
         </div>
         <div className="session-setup-footer">
 

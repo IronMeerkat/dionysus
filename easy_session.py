@@ -14,14 +14,18 @@ from langchain_core.messages import HumanMessage
 logger = getLogger(__name__)
 
 
-async def wipe_agent_memories(agent_name: str) -> int:
+async def wipe_agent_memories(agent_name: str= None) -> int:
     """Deletes all memories with metadata `memory_category=memories` for the given agent name.
 
     Returns the number of memories deleted.
     """
+    filters = [{"memory_category": "memories"}]
+    if agent_name:
+        filters.append({"agent": agent_name})
+
     all_memories = await memory.get_all(
         user_id="user",
-        filters={"AND": [{"memory_category": "memories"}, {"agent": agent_name}]},
+        filters={"AND": filters},
         limit=10_000,
     )
 
