@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from hephaestus.helpers import Oligaton
 
-from database.initialize_mem0 import memory
+from database.mem0_utils import load_information
 from database.models import Character as CharacterModel
 from tools.dice import roll_d20, roll_d10, roll_d6
 from tools import tabletop
@@ -83,33 +83,25 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
 
     async def lore_loader(state: NPCState) -> NPCState:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
-        lore = (await memory.search(
+        lore = await load_information(
             query=last_human_message.content,
-            user_id="user",
             metadata_filters={"AND": [{"memory_category": "lore"}, {"world": tabletop.lore_world}]},
-            rerank=True,
-        ))['results']
+            rerank_threshold=0.7,
+            limit=7,
+        )
 
-        lore = [m for m in lore if m['rerank_score'] > 0.7]
-        limit = min(7, len(lore))
-        lore = lore[:limit]
-
-        return {'lore': '\n'.join([m['memory'] for m in lore]), 'messages': []}
+        return {'lore': lore, 'messages': []}
 
     async def memories_loader(state: NPCState) -> NPCState:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
-        memories = (await memory.search(
+        memories = await load_information(
             query=last_human_message.content,
-            user_id="user",
             metadata_filters={"AND": [{"memory_category": "memories"}, {"agent": character.name}]},
-            rerank=True,
-        ))['results']
+            rerank_threshold=0.5,
+            limit=15,
+        )
 
-        memories = [m for m in memories if m['rerank_score'] > 0.5]
-        limit = min(15, len(memories))
-        memories = memories[:limit]
-
-        return {'memories': '\n'.join([m['memory'] for m in memories]), 'messages': []}
+        return {'memories': memories, 'messages': []}
 
     async def emotion_updater(state: NPCState) -> NPCState:
         prompt = await emotions_prompt_template.ainvoke(state.combined_dump)

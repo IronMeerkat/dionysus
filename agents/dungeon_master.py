@@ -13,7 +13,7 @@ from logging import getLogger
 
 from hephaestus.agent_architectures import create_daisy_chain, wrap_agent_return_delta
 
-from database.initialize_mem0 import memory
+from database.mem0_utils import insert_information
 from database.models import Character as CharacterModel, Player as PlayerModel
 from database.postgres_connection import session
 from tools import tabletop
@@ -57,9 +57,6 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
 
             if isinstance(message, HumanMessage):
                 message.name = player.name
-                message.role = "user"
-            elif isinstance(message, AIMessage):
-                message.role = "assistant"
 
         # scene_change = False
 
@@ -77,31 +74,32 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
 
 
         if len(state.messages) % len(tabletop.characters) * 2 == 0:
-            logger.info("🔄 Scene changed! Updating memories...")   
             tasks = [
                 asyncio.create_task(
-                    memory.add(
-                        messages=[m.model_dump() for m in tabletop.messages],
-                        user_id="user",
-                        metadata={"memory_category": "memories", "agent": character.name, "world": tabletop.lore_world},
+                        insert_information(
+                        messages=tabletop.messages,
+                        metadata_filters={"AND": [{"memory_category": "memories"}, 
+                                                  {"agent": character.name}, 
+                                                  {"world": tabletop.lore_world}]},
                         prompt=character_episodic_memory.compile(name=character.name)
                     )
                 )
                 for character in tabletop.characters
             ]
             await asyncio.gather(*tasks)
-            tabletop.messages = state.messages
         
         else:
             logger.debug("🔄 No scene change detected, continuing...")
-            tabletop.messages.extend(state.messages)
+        
+        tabletop.messages = [*tabletop.messages, *state.messages]
 
 
         for message in state.messages:
             tabletop.conversation.add_message(message.type, message.content, message.name)
 
-        # if len(tabletop.messages) > 12:
-        #     tabletop.messages = tabletop.messages[-6:]
+        ids = map(lambda x: x.id, tabletop.messages)
+        if len(set(ids)) != len(ids):
+            logger.error("👯‍♀️ Duplicate message IDs detected, removing duplicates...")
 
         return {'messages': []}
 
