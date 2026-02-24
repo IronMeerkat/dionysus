@@ -3,6 +3,7 @@ import { Route, Routes, useLocation } from 'react-router';
 import Navbar from './components/Navbar';
 import './App.css';
 import Chat from './pages/Chat';
+import SessionSetup from './pages/SessionSetup';
 
 async function loadFlyonUI() {
   return import('flyonui/flyonui');
@@ -36,12 +37,8 @@ function App() {
     <div className="app-layout">
       <Navbar onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} />
       <Routes>
-        <Route
-          path="/"
-          element={
-            <Chat sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
-          }
-        />
+        <Route path="/" element={<Chat sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />} />
+        <Route path="/session-setup" element={<SessionSetup/>}/>
       </Routes>
     </div>
   );

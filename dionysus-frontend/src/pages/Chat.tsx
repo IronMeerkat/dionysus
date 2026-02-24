@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Navigate } from "react-router";
 import ChatSidebar from "../components/ChatSidebar";
 import MessageInput from "../components/MessageInput";
-import SessionSetup from "../components/SessionSetup";
 import TextMessage from "../components/TextMessage";
 import { useSocket } from "../hooks/useSocket";
+import { useSessionStore } from "../contexts/SessionStore";
 import type {
   StreamStartPayload,
   StreamTokenPayload,
@@ -22,11 +23,6 @@ function generateId(): string {
 
 const CONVERSATION_ID = "default";
 
-interface SessionInfo {
-  player: PlayerOption;
-  characters: CharacterOption[];
-}
-
 interface ChatProps {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -35,7 +31,7 @@ interface ChatProps {
 const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
   const { socket } = useSocket();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [session, setSession] = useState<SessionInfo | null>(null);
+  const { player, characters } = useSessionStore();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const closeSidebar = useCallback(() => {
@@ -92,37 +88,26 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
         id: generateId(),
         content: text,
         role: "user",
-        name: session?.player.name ?? "You",
+        name: player?.name ?? "You",
         createdAt: new Date(),
       };
 
       setMessages((prev) => [...prev, userMsg]);
       socket.sendMessage(CONVERSATION_ID, text);
     },
-    [socket, session],
+    [socket, player, characters],
   );
 
-  const handleSessionReady = useCallback(
-    (player: PlayerOption, characters: CharacterOption[]) => {
-      setSession({ player, characters });
-    },
-    [],
-  );
 
-  if (!session) {
-    return (
-      <div className="chat-layout">
-        <ChatSidebar mobileOpen={sidebarOpen} onClose={closeSidebar} />
-        <SessionSetup onReady={handleSessionReady} />
-      </div>
-    );
+  if (!player || characters.length === 0) {
+    return <Navigate to="/session-setup" replace />;
   }
 
   return (
     <div className="chat-layout">
       <ChatSidebar
-        playerName={session.player.name}
-        characterNames={session.characters.map((c) => c.name)}
+        playerName={player.name}
+        characterNames={characters.map((c) => c.name)}
         mobileOpen={sidebarOpen}
         onClose={closeSidebar}
       />

@@ -8,7 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.events import register_events
-from api.routes import router
+from api.routes.routes import router
+from api.routes.session import session_router
 
 logger = logging.getLogger(__name__)
 
@@ -33,5 +34,5 @@ app.add_middleware(
 
 app.include_router(router)
 register_events(sio)
-
+app.include_router(session_router)
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app)

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import LocationModal from "./LocationModal";
 import StoryBackgroundModal from "./StoryBackgroundModal";
 import "./Navbar.css";
+import { useNavigate } from "react-router";
+
 
 interface NavbarProps {
   onToggleSidebar?: () => void;
@@ -9,6 +11,7 @@ interface NavbarProps {
 }
 
 const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
+  const navigate = useNavigate();
   const [storyModalOpen, setStoryModalOpen] = useState(false);
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -63,6 +66,14 @@ const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
           >
             Location
           </a>
+          <a
+            className="navbar-link"
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate("/session-setup")}
+          >
+            Session Setup
+          </a>
         </div>
 
         <div className="navbar-menu-mobile" ref={menuRef}>
@@ -94,6 +105,15 @@ const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
                 onKeyDown={(e) => { if (e.key === "Enter") { setLocationModalOpen(true); closeMenu(); } }}
               >
                 Location
+              </a>
+              <a
+                className="navbar-dropdown-item"
+                role="button"
+                tabIndex={0}
+                onClick={() => { navigate("/session-setup"); closeMenu(); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { navigate("/session-setup"); closeMenu(); } }}
+              >
+                Session Setup
               </a>
             </div>
           )}

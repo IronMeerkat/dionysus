@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./LocationModal.css";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:8000`;
+import { restService } from "../services/restService";
 
 interface LocationModalProps {
   open: boolean;
@@ -23,10 +22,8 @@ const LocationModal = ({ open, onClose }: LocationModalProps) => {
     setLoading(true);
     setFeedback(null);
 
-    fetch(`${API_BASE}/location`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: { location: string } = await res.json();
+    restService.getLocation()
+      .then((data) => {
         if (!cancelled) setValue(data.location);
       })
       .catch((err) => {
@@ -53,24 +50,12 @@ const LocationModal = ({ open, onClose }: LocationModalProps) => {
     setFeedback(null);
 
     try {
-      const res = await fetch(`${API_BASE}/location`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ location: trimmed }),
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        console.error("❌ Location update failed:", err);
-        setFeedback("Failed to update location.");
-        return;
-      }
-
+      await restService.updateLocation(trimmed);
       setFeedback("Location updated!");
       setTimeout(closeModal, 800);
     } catch (err) {
-      console.error("❌ Location request error:", err);
-      setFeedback("Could not reach the server.");
+      console.error("❌ Location update failed:", err);
+      setFeedback("Failed to update location.");
     } finally {
       setSubmitting(false);
     }

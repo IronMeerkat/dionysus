@@ -1,7 +1,7 @@
 import logging
 
-from fastapi import APIRouter
-
+from fastapi import APIRouter, Body
+from fastapi.exceptions import HTTPException
 from tools.game_tabletop import tabletop
 
 from database.models import Character, Player
@@ -29,8 +29,8 @@ def get_story_background() -> dict[str, str]:
     return {"story_background": tabletop.story_background}
 
 @router.put("/story_background", status_code=200)
-def update_story_background(payload: dict[str, str]) -> dict[str, str]:
-    tabletop.story_background = payload["story_background"]
+def update_story_background(story_background: str = Body(..., embed=True)) -> dict[str, str]:
+    tabletop.story_background = story_background
     return {"message": "Story background updated"}
 
 @router.get('/location')
@@ -38,6 +38,6 @@ def get_location() -> dict[str, str]:
     return {"location": tabletop.location}
 
 @router.put("/location", status_code=200)
-def update_location(payload: dict[str, str]) -> dict[str, str]:
-    tabletop.location = payload["location"]
+def update_location(location: str = Body(..., embed=True)) -> dict[str, str]:
+    tabletop.location = location
     return {"message": "Location updated"}

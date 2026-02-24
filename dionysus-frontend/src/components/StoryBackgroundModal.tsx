@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./StoryBackgroundModal.css";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:8000`;
+import { restService } from "../services/restService";
 
 interface StoryBackgroundModalProps {
   open: boolean;
@@ -23,10 +22,8 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
     setLoading(true);
     setFeedback(null);
 
-    fetch(`${API_BASE}/story_background`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: { story_background: string } = await res.json();
+    restService.getStoryBackground()
+      .then((data) => {
         if (!cancelled) setValue(data.story_background);
       })
       .catch((err) => {
@@ -53,24 +50,12 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
     setFeedback(null);
 
     try {
-      const res = await fetch(`${API_BASE}/story_background`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ story_background: trimmed }),
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        console.error("❌ Story background update failed:", err);
-        setFeedback("Failed to update story background.");
-        return;
-      }
-
+      await restService.updateStoryBackground(trimmed);
       setFeedback("Story background updated!");
       setTimeout(closeModal, 800);
     } catch (err) {
-      console.error("❌ Story background request error:", err);
-      setFeedback("Could not reach the server.");
+      console.error("❌ Story background update failed:", err);
+      setFeedback("Failed to update story background.");
     } finally {
       setSubmitting(false);
     }

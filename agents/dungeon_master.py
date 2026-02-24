@@ -12,6 +12,7 @@ from logging import getLogger
 # from mem0.memory.main import MemoryType 
 
 from hephaestus.agent_architectures import create_daisy_chain, wrap_agent_return_delta
+from hephaestus.helpers import Singleton
 
 from database.mem0_utils import insert_information
 from database.models import Character as CharacterModel, Player as PlayerModel
@@ -98,7 +99,7 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
             tabletop.conversation.add_message(message.type, message.content, message.name)
 
         ids = map(lambda x: x.id, tabletop.messages)
-        if len(set(ids)) != len(ids):
+        if len(set(ids)) != len(list(ids)):
             logger.error("👯‍♀️ Duplicate message IDs detected, removing duplicates...")
 
         return {'messages': []}
@@ -113,3 +114,12 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
     return graph.compile(name=name)
 
 
+class DungeonMaster(metaclass=Singleton):
+
+    graph: StateGraph | None = None
+    
+    def reload(self):
+        self.graph = spawn_dungeon_master(*tabletop.characters, player=tabletop.player)
+
+
+dungeon_master = DungeonMaster()
