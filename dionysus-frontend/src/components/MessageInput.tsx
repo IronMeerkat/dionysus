@@ -51,7 +51,7 @@ const MessageInput = ({ onSend }: MessageInputProps) => {
         />
         <button
           type="button"
-          className="message-input-send btn btn-primary"
+          className="message-input-send btn-action btn btn-primary"
           disabled={!message.trim()}
           onClick={handleSend}
         >

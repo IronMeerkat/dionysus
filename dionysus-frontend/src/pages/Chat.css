@@ -1,17 +1,27 @@
 @reference "../index.css";
 
-.chat-layout {
-  @apply flex flex-1 flex-col overflow-hidden;
-}
-
-@media (min-width: 768px) {
-  .chat-layout {
-    @apply grid grid-cols-[256px_1fr];
-  }
-}
-
 .chat-main {
   @apply flex flex-1 flex-col overflow-hidden;
+}
+
+.chat-title-bar {
+  @apply flex shrink-0 items-center border-b border-base-content/10 px-4 py-2;
+}
+
+.chat-title {
+  @apply cursor-default select-none truncate text-sm font-semibold text-base-content/70;
+}
+
+.chat-title-edit {
+  @apply flex flex-1 items-center gap-2;
+}
+
+.chat-title-input {
+  @apply flex-1 rounded-md border border-base-content/20 bg-base-100 px-2 py-1 text-sm text-base-content outline-none focus:border-primary;
+}
+
+.chat-title-save {
+  @apply shrink-0 rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-content transition-colors hover:bg-primary/80;
 }
 
 .chat-messages-scroll {

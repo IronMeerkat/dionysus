@@ -40,24 +40,14 @@ class Message(Base):
 
     __tablename__ = "messages"
 
-    id = Column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    conversation_id = Column(
-        Integer, ForeignKey("conversations.id"), nullable=False, index=True
-    )
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False, index=True)
     role = Column(String, nullable=False)  # "human" | "ai" | "system"
     speaker_name = Column(String, nullable=True)  # e.g. character or player name
     content = Column(Text, nullable=False)
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
-
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     conversation = relationship("Conversation", back_populates="messages")
+
 
     # ------------------------------------------------------------------
     # Conversion helpers
@@ -73,15 +63,14 @@ class Message(Base):
         """🔄 Convert this row into the matching langchain message type."""
         cls = self._ROLE_TO_CLS.get(self.role)
         if cls is None:
-            logger.warning(
-                f"⚠️ Unknown message role '{self.role}' in message {self.id}, "
-                "falling back to HumanMessage"
-            )
-            cls = HumanMessage
+            raise ValueError(f"Unknown message role '{self.role}' in message {self.id}")
 
-        kwargs: dict = {"content": self.content}
-        if self.speaker_name:
-            kwargs["name"] = self.speaker_name
+        kwargs: dict = {
+            "id": str(self.id),
+            "content": self.content,
+            "type": self.role,
+            "name": self.speaker_name
+        }
         return cls(**kwargs)
 
     def __repr__(self) -> str:
@@ -108,38 +97,19 @@ class Conversation(Base):
 
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=True)
-    player_id = Column(
-        Integer, ForeignKey("players.id"), nullable=True, index=True
-    )
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
+    player_id = Column(Integer, ForeignKey("players.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    location = Column(String, nullable=True)
+    story_background = Column(Text, nullable=True)
+    lore_world = Column(String, nullable=True)
 
     # --- relationships ---------------------------------------------------
 
     player = relationship("Player", lazy="selectin")
-
-    characters = relationship(
-        "Character",
-        secondary=conversation_characters,
-        lazy="selectin",
-    )
-
-    messages = relationship(
-        "Message",
-        back_populates="conversation",
-        order_by="Message.created_at",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
+    characters = relationship("Character", secondary=conversation_characters, lazy="selectin")
+    messages = relationship("Message", back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan", lazy="selectin")
 
     # ------------------------------------------------------------------
     # Participant helpers
@@ -157,12 +127,7 @@ class Conversation(Base):
     # Message helpers
     # ------------------------------------------------------------------
 
-    def add_message(
-        self,
-        role: str,
-        content: str,
-        speaker_name: str | None = None,
-    ) -> "Message | None":
+    def add_message(self, role: str, content: str, speaker_name: str | None = None) -> "Message | None":
         """💬 Append a new message to this conversation.
 
         Args:
@@ -197,19 +162,8 @@ class Conversation(Base):
     # AgentSwarmState conversion
     # ------------------------------------------------------------------
 
-    def to_agent_swarm_state(self) -> dict[str, list[AnyMessage]]:
-        """🐝 Convert this conversation into an AgentSwarmState-compatible dict.
-
-        Returns a dict with a single ``messages`` key whose value is
-        a list of langchain message objects, ready to be passed as
-        input to a compiled agent-swarm graph::
-
-            state = conversation.to_agent_swarm_state()
-            result = swarm.invoke(state, config={"configurable": {"thread_id": "..."}})
-        """
-        return {
-            "messages": [msg.to_langchain_message() for msg in self.messages]
-        }
+    def langchain_messages(self) -> list[AnyMessage]:
+        return [msg.to_langchain_message() for msg in self.messages]
 
 
     @classmethod

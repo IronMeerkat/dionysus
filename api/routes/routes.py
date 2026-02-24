@@ -30,7 +30,9 @@ def get_story_background() -> dict[str, str]:
 
 @router.put("/story_background", status_code=200)
 def update_story_background(story_background: str = Body(..., embed=True)) -> dict[str, str]:
-    tabletop.story_background = story_background
+    tabletop.story_background = tabletop.conversation.story_background = story_background
+    session.commit()
+    logger.info(f"📜 Story background saved to conversation {tabletop.conversation.id}")
     return {"message": "Story background updated"}
 
 @router.get('/location')
@@ -39,5 +41,7 @@ def get_location() -> dict[str, str]:
 
 @router.put("/location", status_code=200)
 def update_location(location: str = Body(..., embed=True)) -> dict[str, str]:
-    tabletop.location = location
+    tabletop.location = tabletop.conversation.location = location
+    session.commit()
+    logger.info(f"📍 Location saved to conversation {tabletop.conversation.id}")
     return {"message": "Location updated"}

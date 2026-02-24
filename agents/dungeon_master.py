@@ -42,6 +42,7 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
     tabletop.player = player
     tabletop.characters = characters
     tabletop.create_conversation()
+    
 
     npc_swarm = create_daisy_chain(*[spawn_npc(c) for c in characters], name="npc_swarm")
 
@@ -92,15 +93,16 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
         else:
             logger.debug("🔄 No scene change detected, continuing...")
         
-        tabletop.messages = [*tabletop.messages, *state.messages]
+        tabletop.messages.extend(state.messages)
 
 
         for message in state.messages:
             tabletop.conversation.add_message(message.type, message.content, message.name)
 
-        ids = map(lambda x: x.id, tabletop.messages)
-        if len(set(ids)) != len(list(ids)):
-            logger.error("👯‍♀️ Duplicate message IDs detected, removing duplicates...")
+        ids = [msg.id for msg in tabletop.messages]
+        dupes = len(ids) - len(set(ids))
+        if dupes:
+            logger.error(f"👯‍♀️ {dupes} duplicate message IDs detected")
 
         return {'messages': []}
 

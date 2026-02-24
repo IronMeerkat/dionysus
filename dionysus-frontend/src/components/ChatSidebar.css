@@ -61,3 +61,24 @@
 .chat-sidebar-character-item {
   @apply text-sm text-base-content/80;
 }
+
+.chat-sidebar-divider {
+  @apply border-base-content/10;
+}
+
+.chat-sidebar-conversations {
+  @apply flex-1 overflow-y-auto;
+}
+
+.chat-sidebar-loading,
+.chat-sidebar-empty {
+  @apply text-xs italic text-base-content/40;
+}
+
+.chat-sidebar-conversation-list {
+  @apply flex flex-col gap-0.5;
+}
+
+.chat-sidebar-conversation-item {
+  @apply w-full cursor-pointer truncate rounded-md px-2 py-1.5 text-left text-sm text-base-content/80 transition-colors hover:bg-base-content/5 hover:text-base-content;
+}

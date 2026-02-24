@@ -69,11 +69,11 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
         (dialogRef as React.MutableRefObject<HTMLDialogElement | null>).current = node;
         if (node && !node.open) node.showModal();
       }}
-      className="story-modal"
+      className="modal-dialog"
       onClose={closeModal}
     >
-      <div className="story-modal-box">
-        <h3 className="story-modal-title">Story Background</h3>
+      <div className="modal-body">
+        <h3 className="modal-title">Story Background</h3>
 
         <textarea
           className="story-modal-textarea textarea textarea-bordered"
@@ -85,20 +85,20 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
         />
 
         {feedback && (
-          <p className="story-modal-feedback">{feedback}</p>
+          <p className="modal-feedback">{feedback}</p>
         )}
 
-        <div className="story-modal-actions">
+        <div className="modal-actions">
           <button
             type="button"
-            className="story-modal-cancel btn btn-sm btn-primary"
+            className="btn-action btn btn-sm btn-primary"
             onClick={closeModal}
           >
             Cancel
           </button>
           <button
             type="button"
-            className="story-modal-submit btn btn-sm btn-primary"
+            className="btn-action btn btn-sm btn-primary"
             disabled={!value.trim() || submitting}
             onClick={handleSubmit}
           >

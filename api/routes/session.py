@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
 from tools.game_tabletop import tabletop
 
-from database.models import Character, Player
+from database.models import Character, Player, Conversation
 from database.postgres_connection import session
 
 from agents.dungeon_master import dungeon_master
@@ -25,8 +25,10 @@ def setup_session(player_id: int = Body(...), character_ids: list[int] = Body(..
     tabletop.player = player
     tabletop.characters = characters
     if start_new_conversation:
+        tabletop.conversation = None
+        tabletop.create_conversation()
         tabletop.messages = []
-    tabletop.conversation = None
+    
     dungeon_master.reload()
     return {"message": "Session setup complete"}
 
@@ -34,7 +36,8 @@ def setup_session(player_id: int = Body(...), character_ids: list[int] = Body(..
 def get_options() -> dict:
     players = session.query(Player.id, Player.name).order_by(Player.id.asc()).all()
     characters = session.query(Character.id, Character.name).order_by(Character.id.asc()).all()
-    return {"players": [{"id": p.id, "name": p.name} for p in players], "characters": [{"id": c.id, "name": c.name} for c in characters]}
+    return {"players": [{"id": p.id, "name": p.name} for p in players], 
+            "characters": [{"id": c.id, "name": c.name} for c in characters]}
 
 @session_router.put("/set_player", status_code=200)
 def set_player(player_id: int = Body(..., embed=True)) -> dict[str, str]:
@@ -53,3 +56,38 @@ def set_characters(character_ids: list[int] = Body(..., embed=True)) -> dict[str
     tabletop.characters = characters
     dungeon_master.reload()
     return {"message": "Characters set"}    
+
+_ROLE_MAP = {"human": "user", "ai": "assistant"}
+
+@session_router.put("/from_conversation", status_code=200)
+def from_conversation(conversation_id: int = Body(..., embed=True)) -> dict[str, object]:
+    conversation = session.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    tabletop.conversation = conversation
+    tabletop.messages = conversation.langchain_messages()
+    limit = min(len(tabletop.messages), 12)
+    tabletop.messages = tabletop.messages[-limit:]
+    tabletop.player = conversation.player
+    tabletop.characters = conversation.characters
+    tabletop.location = conversation.location
+    tabletop.story_background = conversation.story_background
+    tabletop.lore_world = conversation.lore_world
+    dungeon_master.reload()
+    logger.info(f"🔄 Loaded conversation {conversation_id}")
+    return {
+        "title": conversation.title or f"Conversation #{conversation.id}",
+        "player": {"id": conversation.player.id, "name": conversation.player.name},
+        "characters": [{"id": c.id, "name": c.name} for c in conversation.characters],
+        "messages": [
+            {
+                "id": str(msg.id),
+                "content": msg.content,
+                "role": _ROLE_MAP.get(msg.role, msg.role),
+                "name": msg.speaker_name or "",
+                "created_at": msg.created_at.isoformat(),
+            }
+            for msg in conversation.messages
+            if msg.role in _ROLE_MAP
+        ],
+    }

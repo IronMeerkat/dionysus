@@ -52,15 +52,6 @@
   @apply mt-8 flex justify-end;
 }
 
-.session-setup-submit {
-  @apply text-blue-900;
-}
-
-.session-setup-submit:disabled {
-  @apply border border-base-content/10 bg-transparent text-base-content/25 cursor-not-allowed;
-  opacity: 1 !important;
-}
-
 .session-setup-error {
   @apply mb-4 rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
 }

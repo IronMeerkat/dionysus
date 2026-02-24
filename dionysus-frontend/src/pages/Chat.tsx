@@ -5,23 +5,14 @@ import MessageInput from "../components/MessageInput";
 import TextMessage from "../components/TextMessage";
 import { useSocket } from "../hooks/useSocket";
 import { useSessionStore } from "../contexts/SessionStore";
+import { useConversationStore } from "../contexts/ConversationStore";
+import { useMessageStore } from "../contexts/MessageStore";
 import type {
   StreamStartPayload,
   StreamTokenPayload,
   StreamEndPayload,
 } from "../types/socket";
 import "./Chat.css";
-
-function generateId(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
-}
-
-const CONVERSATION_ID = "default";
 
 interface ChatProps {
   sidebarOpen: boolean;
@@ -30,13 +21,40 @@ interface ChatProps {
 
 const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
   const { socket } = useSocket();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { messages, addUserMessage, startStream, appendToken, finalizeStream } = useMessageStore();
   const { player, characters } = useSessionStore();
+  const activeConversationId = useConversationStore((s) => s.activeConversationId);
+  const activeConversationTitle = useConversationStore((s) => s.activeConversationTitle);
+  const renameConversation = useConversationStore((s) => s.renameConversation);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const closeSidebar = useCallback(() => {
     if (sidebarOpen) onToggleSidebar();
   }, [sidebarOpen, onToggleSidebar]);
+
+  const startEditingTitle = useCallback(() => {
+    setDraftTitle(activeConversationTitle ?? "");
+    setEditingTitle(true);
+  }, [activeConversationTitle]);
+
+  const saveTitle = useCallback(async () => {
+    const trimmed = draftTitle.trim();
+    if (trimmed && trimmed !== activeConversationTitle) {
+      await renameConversation(trimmed);
+    }
+    setEditingTitle(false);
+  }, [draftTitle, activeConversationTitle, renameConversation]);
+
+  useEffect(() => {
+    if (editingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [editingTitle]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -44,31 +62,15 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
 
   useEffect(() => {
     const handleStreamStart = ({ messageId, name }: StreamStartPayload) => {
-      const botMsg: Message = {
-        id: messageId,
-        content: "",
-        role: "assistant",
-        name,
-        createdAt: new Date(),
-        streaming: true,
-      };
-      setMessages((prev) => [...prev, botMsg]);
+      startStream(messageId, name);
     };
 
     const handleStreamToken = ({ messageId, token }: StreamTokenPayload) => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === messageId ? { ...m, content: m.content + token } : m,
-        ),
-      );
+      appendToken(messageId, token);
     };
 
     const handleStreamEnd = ({ messageId }: StreamEndPayload) => {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === messageId ? { ...m, streaming: false } : m,
-        ),
-      );
+      finalizeStream(messageId);
     };
 
     socket.on("stream_start", handleStreamStart);
@@ -80,22 +82,14 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
       socket.off("stream_token", handleStreamToken);
       socket.off("stream_end", handleStreamEnd);
     };
-  }, [socket]);
+  }, [socket, startStream, appendToken, finalizeStream]);
 
   const handleSend = useCallback(
     (text: string) => {
-      const userMsg: Message = {
-        id: generateId(),
-        content: text,
-        role: "user",
-        name: player?.name ?? "You",
-        createdAt: new Date(),
-      };
-
-      setMessages((prev) => [...prev, userMsg]);
-      socket.sendMessage(CONVERSATION_ID, text);
+      addUserMessage(text, player?.name ?? "You");
+      socket.sendMessage(String(activeConversationId ?? ""), text);
     },
-    [socket, player, characters],
+    [socket, player, addUserMessage, activeConversationId],
   );
 
 
@@ -104,7 +98,7 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
   }
 
   return (
-    <div className="chat-layout">
+    <div className="page-layout">
       <ChatSidebar
         playerName={player.name}
         characterNames={characters.map((c) => c.name)}
@@ -113,6 +107,36 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
       />
 
       <main className="chat-main">
+        {activeConversationTitle && (
+          <div className="chat-title-bar">
+            {editingTitle ? (
+              <form
+                className="chat-title-edit"
+                onSubmit={(e) => { e.preventDefault(); saveTitle(); }}
+              >
+                <input
+                  ref={titleInputRef}
+                  className="chat-title-input"
+                  value={draftTitle}
+                  onChange={(e) => setDraftTitle(e.target.value)}
+                  onBlur={saveTitle}
+                />
+                <button type="submit" className="chat-title-save">
+                  Save
+                </button>
+              </form>
+            ) : (
+              <h1
+                className="chat-title"
+                onDoubleClick={startEditingTitle}
+                title="Double-click to rename"
+              >
+                {activeConversationTitle}
+              </h1>
+            )}
+          </div>
+        )}
+
         <div className="chat-messages-scroll">
           <div className="chat-messages-list">
             {messages.length === 0 && (

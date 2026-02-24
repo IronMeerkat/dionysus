@@ -3,6 +3,9 @@ import type {
   LocationResponse,
   MessageResponse,
   ApiError,
+  ConversationListResponse,
+  FromConversationResponse,
+  RenameConversationResponse,
 } from "../types/rest";
 
 const API_BASE =
@@ -84,6 +87,26 @@ export const restService = {
     return request<MessageResponse>("/location", {
       method: "PUT",
       body: { location },
+    });
+  },
+
+  getConversations(page = 1, pageSize = 20): Promise<ConversationListResponse> {
+    return request<ConversationListResponse>(
+      `/conversations/list?page=${page}&page_size=${pageSize}`,
+    );
+  },
+
+  loadConversation(conversationId: number): Promise<FromConversationResponse> {
+    return request<FromConversationResponse>("/session/from_conversation", {
+      method: "PUT",
+      body: { conversation_id: conversationId },
+    });
+  },
+
+  renameConversation(conversationId: number, title: string): Promise<RenameConversationResponse> {
+    return request<RenameConversationResponse>(`/conversations/${conversationId}/rename`, {
+      method: "PUT",
+      body: { title },
     });
   },
 } as const;

@@ -5,13 +5,18 @@ import { restService } from "../services/restService";
 import { useNavigate } from "react-router";
 import PlayerSelect from "../components/PlayerSelect";
 import CharacterSelect from "../components/CharacterSelect";
+import ChatSidebar from "../components/ChatSidebar";
 
 
 const SessionSetup = () => {
   const navigate = useNavigate();
 
   const { players, characters, setPlayers, setCharacters } = useOptionsStore();
-  const { setPlayer , setCharacters: setSessionCharacters } = useSessionStore();
+  const { setPlayer, setCharacters: setSessionCharacters } = useSessionStore();
+
+  const navigateToChat = useCallback(() => {
+    navigate("/", { replace: true });
+  }, [navigate]);
 
   const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<number>>(new Set());
@@ -81,7 +86,8 @@ const SessionSetup = () => {
 
   if (loading) {
     return (
-      <div className="chat-layout">
+      <div className="page-layout">
+        <ChatSidebar onAfterSelect={navigateToChat} />
         <div className="session-setup">
           <p className="session-setup-loading">Loading session options...</p>
         </div>
@@ -90,54 +96,58 @@ const SessionSetup = () => {
   }
 
   return (
-    <div className="session-setup">
-      <div className="session-setup-card">
-        <h2 className="session-setup-title">New Game Session</h2>
+    <div className="page-layout">
+      <ChatSidebar onAfterSelect={navigateToChat} />
 
-        {error && <div className="session-setup-error">{error}</div>}
+      <div className="session-setup">
+        <div className="session-setup-card">
+          <h2 className="session-setup-title">New Game Session</h2>
 
-        <PlayerSelect
-          items={players}
-          selectedId={selectedPlayerId}
-          onChange={setSelectedPlayerId}
-        />
+          {error && <div className="session-setup-error">{error}</div>}
 
-        <CharacterSelect
-          items={characters}
-          selectedIds={selectedCharacterIds}
-          onToggle={toggleCharacter}
-        />
+          <PlayerSelect
+            items={players}
+            selectedId={selectedPlayerId}
+            onChange={setSelectedPlayerId}
+          />
 
-        <div className="session-setup-section">
-          <label
-              key="start-new-conversation"
-              className={`session-setup-character-item ${
-                startNewConversation ? "selected" : ""
-              }`}
+          <CharacterSelect
+            items={characters}
+            selectedIds={selectedCharacterIds}
+            onToggle={toggleCharacter}
+          />
+
+          <div className="session-setup-section">
+            <label
+                key="start-new-conversation"
+                className={`session-setup-character-item ${
+                  startNewConversation ? "selected" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="session-setup-character-check"
+                  checked={startNewConversation}
+                  onChange={() => setStartNewConversation(!startNewConversation)}
+                />
+                <span className="session-setup-character-name">Start new conversation</span>
+              </label>
+
+          </div>
+          <div className="session-setup-footer">
+
+            <button
+              type="button"
+              className="btn-action btn btn-primary"
+              disabled={!canSubmit}
+              onClick={handleStart}
             >
-              <input
-                type="checkbox"
-                className="session-setup-character-check"
-                checked={startNewConversation}
-                onChange={() => setStartNewConversation(!startNewConversation)}
-              />
-              <span className="session-setup-character-name">Start new conversation</span>
-            </label>
+              {submitting ? "Starting..." : "Start Session"}
+            </button>
+            
+          </div>
 
         </div>
-        <div className="session-setup-footer">
-
-          <button
-            type="button"
-            className="session-setup-submit btn btn-primary"
-            disabled={!canSubmit}
-            onClick={handleStart}
-          >
-            {submitting ? "Starting..." : "Start Session"}
-          </button>
-          
-        </div>
-
       </div>
     </div>
   );

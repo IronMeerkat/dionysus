@@ -69,11 +69,11 @@ const LocationModal = ({ open, onClose }: LocationModalProps) => {
         (dialogRef as React.MutableRefObject<HTMLDialogElement | null>).current = node;
         if (node && !node.open) node.showModal();
       }}
-      className="location-modal"
+      className="modal-dialog"
       onClose={closeModal}
     >
-      <div className="location-modal-box">
-        <h3 className="location-modal-title">Location</h3>
+      <div className="modal-body">
+        <h3 className="modal-title">Location</h3>
 
         <input
           type="text"
@@ -86,20 +86,20 @@ const LocationModal = ({ open, onClose }: LocationModalProps) => {
         />
 
         {feedback && (
-          <p className="location-modal-feedback">{feedback}</p>
+          <p className="modal-feedback">{feedback}</p>
         )}
 
-        <div className="location-modal-actions">
+        <div className="modal-actions">
           <button
             type="button"
-            className="location-modal-cancel btn btn-sm btn-primary"
+            className="btn-action btn btn-sm btn-primary"
             onClick={closeModal}
           >
             Cancel
           </button>
           <button
             type="button"
-            className="location-modal-submit btn btn-sm btn-primary"
+            className="btn-action btn btn-sm btn-primary"
             disabled={!value.trim() || submitting}
             onClick={handleSubmit}
           >

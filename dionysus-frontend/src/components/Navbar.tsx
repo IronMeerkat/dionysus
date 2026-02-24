@@ -10,12 +10,52 @@ interface NavbarProps {
   sidebarOpen?: boolean;
 }
 
+interface NavbarLink {
+  label: string;
+  onClick: () => void;
+  onKeyDown: () => void;
+}
+
 const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
   const navigate = useNavigate();
   const [storyModalOpen, setStoryModalOpen] = useState(false);
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const links: NavbarLink[] = [
+    { label: "Story Background", onClick: () => setStoryModalOpen(true), onKeyDown: () => setStoryModalOpen(true) },
+    { label: "Location", onClick: () => setLocationModalOpen(true), onKeyDown: () => setLocationModalOpen(true) },
+    { label: "Session Setup", onClick: () => navigate("/session-setup"), onKeyDown: () => navigate("/session-setup") },
+  ];
+
+  const toPhoneLink = (link: NavbarLink) => {
+    return (
+      <a
+        className="navbar-dropdown-item"
+        role="button"
+        tabIndex={0}
+        onClick={() => { link.onClick(); closeMenu(); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { link.onClick(); closeMenu(); } }}
+      >
+        {link.label}
+      </a>
+    );
+  };
+
+  const toDesktopLink = (link: NavbarLink) => {
+    return (
+      <a
+        className="navbar-link"
+        role="button"
+        tabIndex={0}
+        onClick={link.onClick}
+        onKeyDown={(e) => { if (e.key === "Enter") { link.onClick(); } }}
+      >
+        {link.label}
+      </a>
+    );
+  };
 
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 
@@ -48,32 +88,7 @@ const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
         </div>
 
         <div className="navbar-links-desktop">
-          <a
-            className="navbar-link"
-            role="button"
-            tabIndex={0}
-            onClick={() => setStoryModalOpen(true)}
-            onKeyDown={(e) => { if (e.key === "Enter") setStoryModalOpen(true); }}
-          >
-            Story Background
-          </a>
-          <a
-            className="navbar-link"
-            role="button"
-            tabIndex={0}
-            onClick={() => setLocationModalOpen(true)}
-            onKeyDown={(e) => { if (e.key === "Enter") setLocationModalOpen(true); }}
-          >
-            Location
-          </a>
-          <a
-            className="navbar-link"
-            role="button"
-            tabIndex={0}
-            onClick={() => navigate("/session-setup")}
-          >
-            Session Setup
-          </a>
+          {links.map(toDesktopLink)}
         </div>
 
         <div className="navbar-menu-mobile" ref={menuRef}>
@@ -88,33 +103,7 @@ const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
 
           {menuOpen && (
             <div className="navbar-dropdown">
-              <a
-                className="navbar-dropdown-item"
-                role="button"
-                tabIndex={0}
-                onClick={() => { setStoryModalOpen(true); closeMenu(); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { setStoryModalOpen(true); closeMenu(); } }}
-              >
-                Story Background
-              </a>
-              <a
-                className="navbar-dropdown-item"
-                role="button"
-                tabIndex={0}
-                onClick={() => { setLocationModalOpen(true); closeMenu(); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { setLocationModalOpen(true); closeMenu(); } }}
-              >
-                Location
-              </a>
-              <a
-                className="navbar-dropdown-item"
-                role="button"
-                tabIndex={0}
-                onClick={() => { navigate("/session-setup"); closeMenu(); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { navigate("/session-setup"); closeMenu(); } }}
-              >
-                Session Setup
-              </a>
+              {links.map(toPhoneLink)}
             </div>
           )}
         </div>

@@ -1,0 +1,53 @@
+@reference "../index.css";
+
+/* ── Page layout: sidebar + content grid ── */
+
+.page-layout {
+  @apply flex flex-1 flex-col overflow-hidden;
+}
+
+@media (min-width: 768px) {
+  .page-layout {
+    @apply grid grid-cols-[256px_1fr];
+  }
+}
+
+/* ── Action buttons ── */
+
+.btn-action {
+  @apply text-blue-900;
+}
+
+.btn-action:disabled {
+  @apply border border-base-content/10 bg-transparent text-base-content/25 cursor-not-allowed;
+  opacity: 1 !important;
+}
+
+/* ── Dialog modals ── */
+
+.modal-dialog {
+  @apply fixed inset-0 m-auto rounded-xl border border-base-content/10 bg-base-200 p-8 shadow-lg;
+  max-width: 32rem;
+  width: calc(100% - 2rem);
+  max-height: calc(100vh - 4rem);
+}
+
+.modal-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-body {
+  @apply flex flex-col gap-4;
+}
+
+.modal-title {
+  @apply text-lg font-semibold;
+}
+
+.modal-feedback {
+  @apply text-sm text-base-content/60;
+}
+
+.modal-actions {
+  @apply flex justify-end gap-2;
+}
