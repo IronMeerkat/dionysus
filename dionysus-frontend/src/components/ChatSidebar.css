@@ -1,9 +1,10 @@
 @reference "../index.css";
 
-/* ── Mobile: full-screen overlay ── */
+/* ── Mobile: overlay within page-layout ── */
 @media (max-width: 767px) {
   .chat-sidebar {
-    @apply fixed inset-0 z-40 flex -translate-y-full flex-col gap-4 bg-base-200 p-5 transition-transform duration-200 ease-in-out;
+    @apply absolute inset-0 z-40 flex -translate-y-full flex-col gap-4 bg-base-200 p-5 transition-transform duration-200 ease-in-out;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   }
 
   .chat-sidebar--open {
@@ -11,7 +12,7 @@
   }
 
   .chat-sidebar-backdrop {
-    @apply fixed inset-0 z-30 bg-black/40;
+    @apply absolute inset-0 z-30 bg-black/40;
   }
 }
 

@@ -36,6 +36,7 @@ export interface ConversationMessageDTO {
 }
 
 export interface FromConversationResponse {
+  id: number;
   title: string;
   player: PlayerOption;
   characters: CharacterOption[];

@@ -38,7 +38,7 @@ function App() {
       <Navbar onToggleSidebar={toggleSidebar} sidebarOpen={sidebarOpen} />
       <Routes>
         <Route path="/" element={<Chat sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />} />
-        <Route path="/session-setup" element={<SessionSetup/>}/>
+        <Route path="/session-setup" element={<SessionSetup sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />}/>
       </Routes>
     </div>
   );

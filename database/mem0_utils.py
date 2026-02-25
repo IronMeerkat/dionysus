@@ -16,7 +16,6 @@ async def load_information(query: str, metadata_filters: dict[str, str], rerank_
         user_id="user",
         metadata_filters=metadata_filters,
         rerank=True,
-        limit=limit,
     ))['results']
 
     if rerank_threshold is not None:

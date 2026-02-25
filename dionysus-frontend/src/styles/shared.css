@@ -3,7 +3,7 @@
 /* ── Page layout: sidebar + content grid ── */
 
 .page-layout {
-  @apply flex flex-1 flex-col overflow-hidden;
+  @apply relative flex min-h-0 flex-1 flex-col overflow-hidden;
 }
 
 @media (min-width: 768px) {
@@ -29,7 +29,7 @@
   @apply fixed inset-0 m-auto rounded-xl border border-base-content/10 bg-base-200 p-8 shadow-lg;
   max-width: 32rem;
   width: calc(100% - 2rem);
-  max-height: calc(100vh - 4rem);
+  max-height: calc(100dvh - 4rem);
 }
 
 .modal-dialog::backdrop {

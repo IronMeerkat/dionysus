@@ -13,9 +13,28 @@ logger = logging.getLogger(__name__)
 
 session_router = APIRouter(prefix='/session')
 
+def _conversation_response(conversation: Conversation) -> dict[str, object]:
+    return {
+        "id": conversation.id,
+        "title": conversation.title or f"Conversation #{conversation.id}",
+        "player": {"id": conversation.player.id, "name": conversation.player.name},
+        "characters": [{"id": c.id, "name": c.name} for c in conversation.characters],
+        "messages": [
+            {
+                "id": str(msg.id),
+                "content": msg.content,
+                "role": _ROLE_MAP.get(msg.role, msg.role),
+                "name": msg.speaker_name or "",
+                "created_at": msg.created_at.isoformat(),
+            }
+            for msg in conversation.messages
+            if msg.role in _ROLE_MAP
+        ],
+    }
+
 
 @session_router.post("/setup")
-def setup_session(player_id: int = Body(...), character_ids: list[int] = Body(...), start_new_conversation: bool = Body(...)) -> dict[str, str]:
+def setup_session(player_id: int = Body(...), character_ids: list[int] = Body(...), start_new_conversation: bool = Body(...)) -> dict[str, object]:
     player = session.query(Player).filter(Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
@@ -30,7 +49,7 @@ def setup_session(player_id: int = Body(...), character_ids: list[int] = Body(..
         tabletop.messages = []
     
     dungeon_master.reload()
-    return {"message": "Session setup complete"}
+    return _conversation_response(tabletop.conversation)
 
 @session_router.get("/options")
 def get_options() -> dict:
@@ -59,6 +78,9 @@ def set_characters(character_ids: list[int] = Body(..., embed=True)) -> dict[str
 
 _ROLE_MAP = {"human": "user", "ai": "assistant"}
 
+
+
+
 @session_router.put("/from_conversation", status_code=200)
 def from_conversation(conversation_id: int = Body(..., embed=True)) -> dict[str, object]:
     conversation = session.query(Conversation).filter(Conversation.id == conversation_id).first()
@@ -75,19 +97,4 @@ def from_conversation(conversation_id: int = Body(..., embed=True)) -> dict[str,
     tabletop.lore_world = conversation.lore_world
     dungeon_master.reload()
     logger.info(f"🔄 Loaded conversation {conversation_id}")
-    return {
-        "title": conversation.title or f"Conversation #{conversation.id}",
-        "player": {"id": conversation.player.id, "name": conversation.player.name},
-        "characters": [{"id": c.id, "name": c.name} for c in conversation.characters],
-        "messages": [
-            {
-                "id": str(msg.id),
-                "content": msg.content,
-                "role": _ROLE_MAP.get(msg.role, msg.role),
-                "name": msg.speaker_name or "",
-                "created_at": msg.created_at.isoformat(),
-            }
-            for msg in conversation.messages
-            if msg.role in _ROLE_MAP
-        ],
-    }
+    return _conversation_response(conversation)

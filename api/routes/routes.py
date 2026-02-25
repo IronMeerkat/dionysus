@@ -26,7 +26,7 @@ def get_characters() -> list[dict[str, object]]:
 
 @router.get('/story_background')
 def get_story_background() -> dict[str, str]:
-    return {"story_background": tabletop.story_background}
+    return {"story_background": tabletop.story_background or ""}
 
 @router.put("/story_background", status_code=200)
 def update_story_background(story_background: str = Body(..., embed=True)) -> dict[str, str]:
@@ -37,7 +37,7 @@ def update_story_background(story_background: str = Body(..., embed=True)) -> di
 
 @router.get('/location')
 def get_location() -> dict[str, str]:
-    return {"location": tabletop.location}
+    return {"location": tabletop.location or ""}
 
 @router.put("/location", status_code=200)
 def update_location(location: str = Body(..., embed=True)) -> dict[str, str]:

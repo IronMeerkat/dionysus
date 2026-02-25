@@ -61,8 +61,8 @@ export const restService = {
     return request<Options>("/session/options");
   },
 
-  setupSession(playerId: number, characterIds: number[], startNewConversation: boolean): Promise<MessageResponse> {
-    return request<MessageResponse>("/session/setup", {
+  setupSession(playerId: number, characterIds: number[], startNewConversation: boolean): Promise<FromConversationResponse> {
+    return request<FromConversationResponse>("/session/setup", {
       method: "POST",
       body: { player_id: playerId, character_ids: characterIds, start_new_conversation: startNewConversation },
     });

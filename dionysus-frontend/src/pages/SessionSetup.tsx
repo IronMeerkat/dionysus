@@ -1,22 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
 import "./SessionSetup.css";
 import { useOptionsStore, useSessionStore } from "../contexts/SessionStore";
+import { useConversationStore } from "../contexts/ConversationStore";
+import { useMessageStore } from "../contexts/MessageStore";
 import { restService } from "../services/restService";
 import { useNavigate } from "react-router";
 import PlayerSelect from "../components/PlayerSelect";
 import CharacterSelect from "../components/CharacterSelect";
 import ChatSidebar from "../components/ChatSidebar";
 
+interface SessionSetupProps {
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
+}
 
-const SessionSetup = () => {
+const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
   const navigate = useNavigate();
 
   const { players, characters, setPlayers, setCharacters } = useOptionsStore();
   const { setPlayer, setCharacters: setSessionCharacters } = useSessionStore();
+  const { setActiveConversation } = useConversationStore();
+  const setMessages = useMessageStore((s) => s.setMessages);
 
   const navigateToChat = useCallback(() => {
     navigate("/", { replace: true });
   }, [navigate]);
+
+  const closeSidebar = useCallback(() => {
+    if (sidebarOpen) onToggleSidebar();
+  }, [sidebarOpen, onToggleSidebar]);
 
   const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<number>>(new Set());
@@ -72,22 +84,30 @@ const SessionSetup = () => {
     setSubmitting(true);
     setError(null);
     // ReST call here
-    await restService.setupSession(selectedPlayerId, Array.from(selectedCharacterIds), startNewConversation).then(() => {
+    await restService.setupSession(selectedPlayerId, Array.from(selectedCharacterIds), startNewConversation).then(response => {
       // socketService.initSession(selectedPlayerId, Array.from(selectedCharacterIds));
       setPlayer(players.find((p) => p.id === selectedPlayerId)!);
       setSessionCharacters(characters.filter((c) => selectedCharacterIds.has(c.id)));
+      setActiveConversation(response.id, response.title);
+      setMessages(response.messages.map((m) => ({
+        id: m.id,
+        content: m.content,
+        role: m.role,
+        name: m.name,
+        createdAt: new Date(m.created_at),
+      })));
       navigate("/", { replace: true });
     }).catch((error: Error) => {
       setError(error.message);
     }).finally(() => {
       setSubmitting(false);
     });
-  }, [canSubmit, selectedPlayerId, selectedCharacterIds]);
+  }, [canSubmit, selectedPlayerId, selectedCharacterIds, startNewConversation]);
 
   if (loading) {
     return (
       <div className="page-layout">
-        <ChatSidebar onAfterSelect={navigateToChat} />
+        <ChatSidebar mobileOpen={sidebarOpen} onClose={closeSidebar} onAfterSelect={navigateToChat} />
         <div className="session-setup">
           <p className="session-setup-loading">Loading session options...</p>
         </div>
@@ -97,7 +117,7 @@ const SessionSetup = () => {
 
   return (
     <div className="page-layout">
-      <ChatSidebar onAfterSelect={navigateToChat} />
+      <ChatSidebar mobileOpen={sidebarOpen} onClose={closeSidebar} onAfterSelect={navigateToChat} />
 
       <div className="session-setup">
         <div className="session-setup-card">

@@ -34,13 +34,6 @@ class EmotionalState(BaseModel, metaclass=Oligaton):
     fear: int = Field(default=0, ge=-20, le=20, description="Intensity of perceived threat or dread.")
     joy: int = Field(default=0, ge=-20, le=20, description="Intensity of happiness or delight.")
     sadness: int = Field(default=0, ge=-20, le=20, description="Intensity of sorrow or grief.")
-    anger: int = Field(default=0, ge=-20, le=20, description="Intensity of frustration or rage.")
-    surprise: int = Field(default=0, ge=-20, le=20, description="Intensity of unexpected shock or astonishment.")
-    disgust: int = Field(default=0, ge=-20, le=20, description="Intensity of revulsion or disapproval.")
-    anticipation: int = Field(default=0, ge=-20, le=20, description="Intensity of expectation about what comes next.")
-    trust: int = Field(default=0, ge=-20, le=20, description="Intensity of confidence in others.")
-    disappointment: int = Field(default=0, ge=-20, le=20, description="Intensity of unmet expectations.")
-    relief: int = Field(default=0, ge=-20, le=20, description="Intensity of easing after stress or danger.")
     hope: int = Field(default=0, ge=-20, le=20, description="Intensity of positive expectation for outcomes.")
 
 
@@ -97,8 +90,8 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
         memories = await load_information(
             query=last_human_message.content,
             metadata_filters={"AND": [{"memory_category": "memories"}, {"agent": character.name}]},
-            rerank_threshold=0.5,
-            limit=15,
+            rerank_threshold=0.6,
+            limit=7,
         )
 
         return {'memories': memories, 'messages': []}
