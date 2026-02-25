@@ -40,8 +40,9 @@ async def insert_information(messages: list[AnyMessage], metadata_filters: dict[
         elif isinstance(message, AIMessage):
             message.role = "assistant"
 
+
     results = await memory.add(
-        messages=[m.model_dump() for m in messages],
+        messages=[{"role": m.role, "content": m.content} for m in messages if m.role in ["user", "assistant"]],
         user_id="user",
         metadata=metadata_filters,
         prompt=prompt,

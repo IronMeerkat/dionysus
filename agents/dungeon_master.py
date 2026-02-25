@@ -75,7 +75,7 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
         #         scene_change = result.scene_changed
 
 
-        if len(state.messages) % len(tabletop.characters) * 2 == 0:
+        if len(tabletop.conversation.messages) % 10 == 0:
             tasks = [
                 asyncio.create_task(
                         insert_information(

@@ -11,7 +11,7 @@ import type {
 const API_BASE =
   import.meta.env.VITE_API_URL ?? `http://${window.location.hostname}:8000`;
 
-type HttpMethod = "GET" | "PUT" | "POST";
+type HttpMethod = "GET" | "PUT" | "POST" | "DELETE";
 
 interface RequestOptions {
   method?: HttpMethod;
@@ -107,6 +107,19 @@ export const restService = {
     return request<RenameConversationResponse>(`/conversations/${conversationId}/rename`, {
       method: "PUT",
       body: { title },
+    });
+  },
+
+  editMessage(messageId: string, content: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/messages/${messageId}`, {
+      method: "PUT",
+      body: { content },
+    });
+  },
+
+  deleteMessage(messageId: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/messages/${messageId}`, {
+      method: "DELETE",
     });
   },
 } as const;

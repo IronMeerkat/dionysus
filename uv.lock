@@ -889,6 +889,7 @@ dependencies = [
     { name = "alembic" },
     { name = "chainlit" },
     { name = "fastapi" },
+    { name = "graphiti" },
     { name = "hephaestus" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-postgres" },
@@ -909,6 +910,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.18.4" },
     { name = "chainlit" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "graphiti", specifier = ">=0.1.13" },
     { name = "hephaestus", editable = "../hephaestus" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=3.0.4" },
@@ -1164,6 +1166,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/e5/7b/adfd75544c415c487
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/ab/09169d5a4612a5f92490806649ac8d41e3ec9129c636754575b3553f4ea4/googleapis_common_protos-1.72.0-py3-none-any.whl", hash = "sha256:4299c5a82d5ae1a9702ada957347726b167f9f8d1fc352477702a1e851ff4038", size = 297515, upload-time = "2025-11-06T18:29:13.14Z" },
 ]
+
+[[package]]
+name = "graphiti"
+version = "0.1.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/13/e7e4eba09504b0831da305414cdb7b22121d883d9690b45e1e8fcff3bad3/graphiti-0.1.13.tar.gz", hash = "sha256:6d2b72fc32f6db3861182cf73753ee3bc5f4b32f4850372cb15a7e3cb874b462", size = 8459, upload-time = "2018-11-22T10:32:02.393Z" }
 
 [[package]]
 name = "greenlet"

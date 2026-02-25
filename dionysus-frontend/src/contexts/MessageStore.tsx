@@ -13,6 +13,8 @@ interface MessageStoreState {
   messages: Message[];
   setMessages: (messages: Message[]) => void;
   addUserMessage: (content: string, playerName: string) => void;
+  updateMessageContent: (messageId: string, content: string) => void;
+  removeMessage: (messageId: string) => void;
   startStream: (messageId: string, name: string) => void;
   appendToken: (messageId: string, token: string) => void;
   finalizeStream: (messageId: string) => void;
@@ -35,6 +37,18 @@ const useMessageStore = create<MessageStoreState>((set) => ({
           createdAt: new Date(),
         },
       ],
+    })),
+
+  updateMessageContent: (messageId, content) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === messageId ? { ...m, content } : m,
+      ),
+    })),
+
+  removeMessage: (messageId) =>
+    set((state) => ({
+      messages: state.messages.filter((m) => m.id !== messageId),
     })),
 
   startStream: (messageId, name) =>

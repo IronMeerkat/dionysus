@@ -24,6 +24,10 @@
   @apply shrink-0 rounded-md bg-primary px-3 py-1 text-sm font-medium text-primary-content transition-colors hover:bg-primary/80;
 }
 
+.chat-title-delete {
+  @apply shrink-0 rounded-md bg-error px-3 py-1 text-sm font-medium text-error-content transition-colors hover:bg-error/80;
+}
+
 .chat-messages-scroll {
   @apply flex-1 overflow-y-auto px-4 py-6;
 }

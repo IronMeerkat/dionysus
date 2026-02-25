@@ -1,11 +1,12 @@
 import logging
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Path
 from fastapi.exceptions import HTTPException
 from tools.game_tabletop import tabletop
 
-from database.models import Character, Player
+from database.models import Character, Player, Message
 from database.postgres_connection import session
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -45,3 +46,23 @@ def update_location(location: str = Body(..., embed=True)) -> dict[str, str]:
     session.commit()
     logger.info(f"📍 Location saved to conversation {tabletop.conversation.id}")
     return {"message": "Location updated"}
+
+@router.put('/messages/{message_id}', status_code=200)
+def edit_message(message_id: UUID = Path(..., embed=True), content: str = Body(..., embed=True)) -> dict[str, str]:
+    message = session.query(Message).filter(Message.id == message_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    message.content = content
+    session.commit()
+    logger.info(f"📝 Message {message_id} edited")
+    return {"message": "Message edited"}
+
+@router.delete('/messages/{message_id}', status_code=200)
+def delete_message(message_id: UUID = Path(..., embed=True)) -> dict[str, str]:
+    message = session.query(Message).filter(Message.id == message_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    session.delete(message)
+    session.commit()
+    logger.info(f"📝 Message {message_id} deleted")
+    return {"message": "Message deleted"}

@@ -18,9 +18,9 @@ persistent_path = Path(__file__).parent / "persistent_mem0"
 persistent_path.mkdir(parents=True, exist_ok=True)
 
 model = ChatXAI(
-    model="grok-4-fast-reasoning",
+    model="grok-4-1-fast-reasoning",
     temperature=0.1,
-    max_tokens=1024,
+    # max_tokens=1024,
 )
 
 embeddings = OllamaEmbeddings(model="mxbai-embed-large")

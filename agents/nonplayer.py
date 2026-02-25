@@ -14,7 +14,7 @@ from database.mem0_utils import load_information
 from database.models import Character as CharacterModel
 from tools.dice import roll_d20, roll_d10, roll_d6
 from tools import tabletop
-from utils.prompts import plan_prompt_template, narrator_prompt_template, emotions_prompt_template
+from utils.prompts import plan_prompt_template, narrator_prompt_template, emotions_prompt_template, should_respond_prompt_template  
 
 logger = getLogger(__name__)
 
@@ -27,6 +27,9 @@ def get_model(model: str = "grok-4-1-fast-reasoning", temperature: float = 1, ma
 model = get_model()
 tools = [roll_d20, roll_d10, roll_d6]
 tools_by_name = {tool.name: tool for tool in tools}
+
+class ShouldRespondDecision(BaseModel):
+    should_respond: bool = Field(description="Whether the NPC should respond to the current message.")
 
 class EmotionalState(BaseModel, metaclass=Oligaton):
     love: int = Field(default=0, ge=-20, le=20, description="Intensity of affectionate attachment.")
@@ -73,6 +76,19 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
                 'emotional_state': emotional_state.model_dump(exclude_unset=True),
                 **self.model_dump(exclude={'messages'}),
             }
+    
+    async def should_respond(state: NPCState):
+        prompt = await should_respond_prompt_template.ainvoke({
+            "name": character.name,
+            "description": character.description,
+            "messages": state.combined_messages})
+        decision_model = get_model(temperature=0.1).with_structured_output(ShouldRespondDecision)
+        response = await decision_model.ainvoke(prompt)
+        if response.should_respond:
+            logger.info(f"✅ {character.name} decided to respond")
+            return ["lore_loader", "memories_loader"]
+        logger.info(f"🚫 {character.name} decided NOT to respond")
+        return END
 
     async def lore_loader(state: NPCState) -> NPCState:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
@@ -144,7 +160,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
     graph.add_node("planner", planner)
 
     graph.add_node("npc_narrator", npc_narrator)
-    graph.add_conditional_edges(START, lambda s: ["lore_loader", "memories_loader"])
+    graph.add_conditional_edges(START, should_respond)
     graph.add_edge(["lore_loader", "memories_loader"], "emotion_updater")
     graph.add_edge("emotion_updater", "planner")
 
