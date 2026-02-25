@@ -94,7 +94,7 @@ def from_conversation(conversation_id: int = Body(..., embed=True)) -> dict[str,
     tabletop.characters = conversation.characters
     tabletop.location = conversation.location
     tabletop.story_background = conversation.story_background
-    tabletop.lore_world = conversation.lore_world
+    # tabletop.lore_world = conversation.lore_world
     dungeon_master.reload()
     logger.info(f"🔄 Loaded conversation {conversation_id}")
     return _conversation_response(conversation)

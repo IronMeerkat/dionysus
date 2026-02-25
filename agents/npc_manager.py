@@ -30,18 +30,14 @@ async def memories_loader(state: NPCManagerState) -> NPCManagerState:
     lore = (await memory.search( # TODO should be AI or tool call, keep human for now
         query=last_human_message.content,
         user_id="user",
-        metadata_filters={'world': tabletop.lore_world}, rerank=True))['results']
+        filters={'world': tabletop.lore_world}, rerank=True))['results']
     limit = min(20, len(lore))
     lore = lore[:limit]
 
-    agents = [{"agent": c.name} for c in tabletop.characters]
-
-    
     episodic_memories = (await memory.search(
         query=last_human_message.content,
         user_id="user",
-        # metadata_filters={'AND': [{"memory_category": "memories"}, {"OR": agents}]}, 
-        metadata_filters={'OR': agents},
+        filters={'agent': {'in': [c.name for c in tabletop.characters]}},
         rerank=True))['results']
 
     return {'memories': '\n'.join([m['memory'] for m in [*episodic_memories, *lore]]), 'messages': []}

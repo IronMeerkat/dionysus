@@ -15,11 +15,11 @@ logger = getLogger(__name__)
 
 
 async def wipe_agent_memories(agent_name: str= None) -> int:
-    """Deletes all memories with metadata `memory_category=memories` for the given agent name.
+    """Deletes all memories with metadata `memory_subcategory=memories` for the given agent name.
 
     Returns the number of memories deleted.
     """
-    filters = [{"memory_category": "memories"}]
+    filters = [{"memory_subcategory": "memories"}]
     if agent_name:
         filters.append({"agent": agent_name})
 

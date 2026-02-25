@@ -78,7 +78,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
         lore = await load_information(
             query=last_human_message.content,
-            metadata_filters={"AND": [{"memory_category": "lore"}, {"world": tabletop.lore_world}]},
+            metadata_filters={"memory_subcategory": "lore", "world": tabletop.lore_world},
             rerank_threshold=0.7,
             limit=7,
         )
@@ -89,7 +89,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
         memories = await load_information(
             query=last_human_message.content,
-            metadata_filters={"AND": [{"memory_category": "memories"}, {"agent": character.name}]},
+            metadata_filters={"memory_subcategory": "memories", "agent": character.name},
             rerank_threshold=0.6,
             limit=7,
         )
@@ -119,7 +119,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
             })
         logger.debug(f"🧠 Planner prompt: {prompt}")
 
-        thoughts = await get_model(top_p=0.7, temperature=0.8).ainvoke(prompt)
+        thoughts = await get_model(top_p=0.7, temperature=0.8, max_tokens=1024).ainvoke(prompt)
         if thoughts.content is None:
             logger.warning("🧠 Planner returned None, using empty Thoughts")
         logger.info(f"🧠 Planner response: {thoughts.content[:min(200, len(thoughts.content))]}...")

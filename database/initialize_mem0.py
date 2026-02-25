@@ -1,6 +1,9 @@
 
 import asyncio
+import functools
 import os
+from logging import getLogger
+from typing import Dict, List, Optional
 
 from mem0 import AsyncMemory
 from mem0.configs.base import MemoryConfig, RerankerConfig, VectorStoreConfig, EmbedderConfig, LlmConfig
@@ -8,6 +11,8 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_xai import ChatXAI
 from langchain_chroma import Chroma
 from pathlib import Path
+
+logger = getLogger(__name__)
 
 persistent_path = Path(__file__).parent / "persistent_mem0"
 persistent_path.mkdir(parents=True, exist_ok=True)
@@ -58,5 +63,32 @@ config = MemoryConfig(
 
 memory = AsyncMemory(config=config)
 
-# memory = AsyncMemory()
+
+def _wrap_chroma_filters(filters: Optional[Dict]) -> Optional[Dict]:
+    """Chroma requires exactly one top-level key in `where`.
+    mem0 builds flat dicts like {"field": "val", "user_id": "user"} which
+    Chroma rejects. Wrap multi-key dicts in $and automatically."""
+    if not filters or len(filters) <= 1:
+        return filters
+    return {"$and": [{k: v} for k, v in filters.items()]}
+
+
+_original_vs_search = memory.vector_store.search
+_original_vs_list = memory.vector_store.list
+
+
+@functools.wraps(_original_vs_search)
+def _patched_vs_search(query: str, vectors: List[List[float]], limit: int = 5, filters: Optional[Dict] = None):
+    logger.debug(f"🔍 Chroma search filter patch: {filters}")
+    return _original_vs_search(query=query, vectors=vectors, limit=limit, filters=_wrap_chroma_filters(filters))
+
+
+@functools.wraps(_original_vs_list)
+def _patched_vs_list(filters=None, limit=None):
+    logger.debug(f"🔍 Chroma list filter patch: {filters}")
+    return _original_vs_list(filters=_wrap_chroma_filters(filters), limit=limit)
+
+
+memory.vector_store.search = _patched_vs_search
+memory.vector_store.list = _patched_vs_list
 

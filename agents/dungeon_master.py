@@ -80,9 +80,9 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
                 asyncio.create_task(
                         insert_information(
                         messages=tabletop.messages,
-                        metadata_filters={"AND": [{"memory_category": "memories"}, 
-                                                  {"agent": character.name}, 
-                                                  {"world": tabletop.lore_world}]},
+                        metadata_filters={"memory_subcategory": "memories",
+                                                  "agent": character.name, 
+                                                  "world": tabletop.lore_world},
                         prompt=character_episodic_memory.compile(name=character.name)
                     )
                 )

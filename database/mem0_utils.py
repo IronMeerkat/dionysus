@@ -14,7 +14,7 @@ async def load_information(query: str, metadata_filters: dict[str, str], rerank_
     results = (await memory.search(
         query=query,
         user_id="user",
-        metadata_filters=metadata_filters,
+        filters=metadata_filters,
         rerank=True,
     ))['results']
 
@@ -49,13 +49,13 @@ async def insert_information(messages: list[AnyMessage], metadata_filters: dict[
     logger.debug(f"💾 Inserted {len(results)} memories into the mem0 database")
 
 async def wipe_agent_memories(agent_name: str) -> int:
-    """Deletes all memories with metadata `memory_category=memories` for the given agent name.
+    """Deletes all memories with metadata `memory_subcategory=memories` for the given agent name.
 
     Returns the number of memories deleted.
     """
     all_memories = await memory.get_all(
         user_id="user",
-        filters={"AND": [{"memory_category": "memories"}, {"agent": agent_name}]},
+        filters={"AND": [{"memory_subcategory": "memories"}, {"agent": agent_name}]},
         limit=10_000,
     )
     return len(all_memories)
