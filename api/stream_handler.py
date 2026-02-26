@@ -10,14 +10,29 @@ from uuid import uuid4
 import socketio
 from langchain_core.messages import AIMessageChunk, ToolMessageChunk
 
-from chat.metadata import (
-    NODE_NARRATOR,
-    NODE_PLANNER,
-    path_from_namespace,
-    resolve_speaker,
-)
 
 logger = getLogger(__name__)
+
+NODE_PLANNER = "planner"
+NODE_USE_TOOLS = "use_tools"
+NODE_NARRATOR = "npc_narrator"
+NARRATOR_NODES = frozenset({NODE_PLANNER, NODE_USE_TOOLS, NODE_NARRATOR})
+
+def resolve_speaker(character_list: list[str], path: list[str]) -> str:
+    """Resolve character name from stream metadata. Innermost path element wins."""
+    if len(character_list) == 1:
+        return character_list[0]
+    
+    matching = [c for c in path if c in character_list]
+    return matching[-1]
+
+
+def path_from_namespace(namespace: tuple[str, ...]) -> list[str]:
+    """Extract node names from namespace, e.g. ('character_1:uuid', 'planner:uuid') -> ['character_1', 'planner']."""
+    return [
+        name for part in namespace
+        if not (name := part.split(":")[0] if ":" in part else part).startswith("__")
+    ]
 
 
 class SocketStreamHandler:

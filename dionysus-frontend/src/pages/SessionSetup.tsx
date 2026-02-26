@@ -32,7 +32,6 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
 
   const [selectedPlayerId, setSelectedPlayerId] = useState<number | null>(null);
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<number>>(new Set());
-  const [startNewConversation, setStartNewConversation] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,9 +82,7 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
     if (!canSubmit || selectedPlayerId === null) return;
     setSubmitting(true);
     setError(null);
-    // ReST call here
-    await restService.setupSession(selectedPlayerId, Array.from(selectedCharacterIds), startNewConversation).then(response => {
-      // socketService.initSession(selectedPlayerId, Array.from(selectedCharacterIds));
+    await restService.setupSession(selectedPlayerId, Array.from(selectedCharacterIds)).then(response => {
       setPlayer(players.find((p) => p.id === selectedPlayerId)!);
       setSessionCharacters(characters.filter((c) => selectedCharacterIds.has(c.id)));
       setActiveConversation(response.id, response.title);
@@ -102,7 +99,7 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
     }).finally(() => {
       setSubmitting(false);
     });
-  }, [canSubmit, selectedPlayerId, selectedCharacterIds, startNewConversation]);
+  }, [canSubmit, selectedPlayerId, selectedCharacterIds]);
 
   if (loading) {
     return (
@@ -137,23 +134,6 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
             onToggle={toggleCharacter}
           />
 
-          <div className="session-setup-section">
-            <label
-                key="start-new-conversation"
-                className={`session-setup-character-item ${
-                  startNewConversation ? "selected" : ""
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="session-setup-character-check"
-                  checked={startNewConversation}
-                  onChange={() => setStartNewConversation(!startNewConversation)}
-                />
-                <span className="session-setup-character-name">Start new conversation</span>
-              </label>
-
-          </div>
           <div className="session-setup-footer">
 
             <button

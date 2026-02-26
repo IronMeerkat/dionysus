@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./StoryBackgroundModal.css";
 import { restService } from "../services/restService";
+import { useConversationStore } from "../contexts/ConversationStore";
 
 interface StoryBackgroundModalProps {
   open: boolean;
@@ -9,6 +10,7 @@ interface StoryBackgroundModalProps {
 }
 
 const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
+  const activeConversationId = useConversationStore((s) => s.activeConversationId);
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -16,13 +18,13 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || activeConversationId === null) return;
 
     let cancelled = false;
     setLoading(true);
     setFeedback(null);
 
-    restService.getStoryBackground()
+    restService.getStoryBackground(activeConversationId)
       .then((data) => {
         if (!cancelled) setValue(data.story_background);
       })
@@ -35,7 +37,7 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
       });
 
     return () => { cancelled = true; };
-  }, [open]);
+  }, [open, activeConversationId]);
 
   const closeModal = useCallback(() => {
     dialogRef.current?.close();
@@ -44,13 +46,13 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
 
   const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
-    if (!trimmed) return;
+    if (!trimmed || activeConversationId === null) return;
 
     setSubmitting(true);
     setFeedback(null);
 
     try {
-      await restService.updateStoryBackground(trimmed);
+      await restService.updateStoryBackground(activeConversationId, trimmed);
       setFeedback("Story background updated!");
       setTimeout(closeModal, 800);
     } catch (err) {
@@ -59,7 +61,7 @@ const StoryBackgroundModal = ({ open, onClose }: StoryBackgroundModalProps) => {
     } finally {
       setSubmitting(false);
     }
-  }, [value, closeModal]);
+  }, [value, closeModal, activeConversationId]);
 
   if (!open) return null;
 

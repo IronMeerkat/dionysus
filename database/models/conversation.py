@@ -91,6 +91,10 @@ class Conversation(Base):
 
     Tracks participants, stores every message, and can be converted
     straight into an ``AgentSwarmState`` dict for graph execution.
+
+    The transient ``message_buffer`` holds an in-memory sliding window
+    of langchain messages used by agents during graph execution.  It is
+    NOT persisted to the database.
     """
 
     __tablename__ = "conversations"
@@ -111,6 +115,10 @@ class Conversation(Base):
     characters = relationship("Character", secondary=conversation_characters, lazy="selectin")
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan", lazy="selectin")
 
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.message_buffer: list[AnyMessage] = []
+
     # ------------------------------------------------------------------
     # Participant helpers
     # ------------------------------------------------------------------
@@ -127,18 +135,21 @@ class Conversation(Base):
     # Message helpers
     # ------------------------------------------------------------------
 
-    def add_message(self, role: str, content: str, speaker_name: str | None = None) -> "Message | None":
+    def add_message(self, role: str, content: str, speaker_name: str, _id: uuid.UUID | None = None) -> "Message | None":
         """💬 Append a new message to this conversation.
 
         Args:
             role: One of ``"human"``, ``"ai"``, or ``"system"``.
             content: The message body.
-            speaker_name: Optional display name (character / player).
+            speaker_name: Display name (character / player).
+            id: Optional UUID to use for this message. When provided the same
+                UUID that was emitted to the frontend is written to the DB.
 
         Returns:
             The newly created Message instance, or None if skipped (duplicate UUID).
         """
-        msg = Message(role=role, content=content, speaker_name=speaker_name)
+        _id = _id or uuid.uuid4()
+        msg = Message(id=_id, role=role, content=content, speaker_name=speaker_name)
         self.messages.append(msg)
         session.add(msg)
         session.add(self)
@@ -167,9 +178,10 @@ class Conversation(Base):
 
 
     @classmethod
-    def create(cls, player: Player, characters: list[Character]) -> "Conversation":
+    def create(cls, player: Player, characters: list[Character], location: str ='', story_background: str ='', lore_world: str ='') -> "Conversation":
         """🎭 Create a new conversation between a player and one or more characters."""
-        conversation = cls(player=player)
+        conversation = cls(player=player, location=location, story_background=story_background, lore_world=lore_world)
+
         for character in characters:
             conversation.add_character(character)
         conversation.title = f"{player.name} {', '.join([c.name for c in characters])}"

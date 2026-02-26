@@ -61,30 +61,30 @@ export const restService = {
     return request<Options>("/session/options");
   },
 
-  setupSession(playerId: number, characterIds: number[], startNewConversation: boolean): Promise<FromConversationResponse> {
+  setupSession(playerId: number, characterIds: number[]): Promise<FromConversationResponse> {
     return request<FromConversationResponse>("/session/setup", {
       method: "POST",
-      body: { player_id: playerId, character_ids: characterIds, start_new_conversation: startNewConversation },
+      body: { player_id: playerId, character_ids: characterIds },
     });
   },
 
-  getStoryBackground(): Promise<StoryBackgroundResponse> {
-    return request<StoryBackgroundResponse>("/story_background");
+  getStoryBackground(conversationId: number): Promise<StoryBackgroundResponse> {
+    return request<StoryBackgroundResponse>(`/conversations/${conversationId}/story_background`);
   },
 
-  updateStoryBackground(storyBackground: string): Promise<MessageResponse> {
-    return request<MessageResponse>("/story_background", {
+  updateStoryBackground(conversationId: number, storyBackground: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/conversations/${conversationId}/story_background`, {
       method: "PUT",
       body: { story_background: storyBackground },
     });
   },
 
-  getLocation(): Promise<LocationResponse> {
-    return request<LocationResponse>("/location");
+  getLocation(conversationId: number): Promise<LocationResponse> {
+    return request<LocationResponse>(`/conversations/${conversationId}/location`);
   },
 
-  updateLocation(location: string): Promise<MessageResponse> {
-    return request<MessageResponse>("/location", {
+  updateLocation(conversationId: number, location: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/conversations/${conversationId}/location`, {
       method: "PUT",
       body: { location },
     });
@@ -97,10 +97,7 @@ export const restService = {
   },
 
   loadConversation(conversationId: number): Promise<FromConversationResponse> {
-    return request<FromConversationResponse>("/session/from_conversation", {
-      method: "PUT",
-      body: { conversation_id: conversationId },
-    });
+    return request<FromConversationResponse>(`/session/from_conversation/${conversationId}`);
   },
 
   renameConversation(conversationId: number, title: string): Promise<RenameConversationResponse> {

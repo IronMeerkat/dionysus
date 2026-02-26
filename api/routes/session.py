@@ -2,16 +2,18 @@ import logging
 
 from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
-from tools.game_tabletop import tabletop
 
 from database.models import Character, Player, Conversation
 from database.postgres_connection import session
-
-from agents.dungeon_master import dungeon_master
+from hephaestus.settings import settings
+from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = logging.getLogger(__name__)
 
 session_router = APIRouter(prefix='/session')
+
+_ROLE_MAP = {"human": "user", "ai": "assistant"}
+
 
 def _conversation_response(conversation: Conversation) -> dict[str, object]:
     return {
@@ -34,67 +36,48 @@ def _conversation_response(conversation: Conversation) -> dict[str, object]:
 
 
 @session_router.post("/setup")
-def setup_session(player_id: int = Body(...), character_ids: list[int] = Body(...), start_new_conversation: bool = Body(...)) -> dict[str, object]:
+def setup_session(
+    player_id: int = Body(...),
+    character_ids: list[int] = Body(...),
+) -> dict[str, object]:
+    """Create a new Conversation in the DB and return it.
+
+    The client should then pass the returned ``id`` to the SocketIO
+    ``init_session`` event to start the in-RAM session.
+    """
     player = session.query(Player).filter(Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
     characters = session.query(Character).filter(Character.id.in_(character_ids)).all()
     if not characters:
         raise HTTPException(status_code=404, detail="Characters not found")
-    tabletop.player = player
-    tabletop.characters = characters
-    if start_new_conversation:
-        tabletop.conversation = None
-        tabletop.create_conversation()
-        tabletop.messages = []
-    
-    dungeon_master.reload()
-    return _conversation_response(tabletop.conversation)
+
+    conversation = Conversation.create(
+        player=player,
+        characters=characters,
+        location=placeholder_location,
+        story_background=placeholder_scenario,
+        lore_world=settings.PLACEHOLDER_LORE_WORLD,
+    )
+    logger.info(f"🎮 Created conversation {conversation.id} for player={player.name}")
+    return _conversation_response(conversation)
+
 
 @session_router.get("/options")
 def get_options() -> dict:
     players = session.query(Player.id, Player.name).order_by(Player.id.asc()).all()
     characters = session.query(Character.id, Character.name).order_by(Character.id.asc()).all()
-    return {"players": [{"id": p.id, "name": p.name} for p in players], 
-            "characters": [{"id": c.id, "name": c.name} for c in characters]}
-
-@session_router.put("/set_player", status_code=200)
-def set_player(player_id: int = Body(..., embed=True)) -> dict[str, str]:
-    player = session.query(Player).filter(Player.id == player_id).first()
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-    tabletop.player = player
-    dungeon_master.reload()
-    return {"message": "Player set"}
-
-@session_router.put("/set_characters", status_code=200)
-def set_characters(character_ids: list[int] = Body(..., embed=True)) -> dict[str, str]:
-    characters = session.query(Character).filter(Character.id.in_(character_ids)).all()
-    if not characters:
-        raise HTTPException(status_code=404, detail="Characters not found")
-    tabletop.characters = characters
-    dungeon_master.reload()
-    return {"message": "Characters set"}    
-
-_ROLE_MAP = {"human": "user", "ai": "assistant"}
+    return {
+        "players": [{"id": p.id, "name": p.name} for p in players],
+        "characters": [{"id": c.id, "name": c.name} for c in characters],
+    }
 
 
-
-
-@session_router.put("/from_conversation", status_code=200)
-def from_conversation(conversation_id: int = Body(..., embed=True)) -> dict[str, object]:
+@session_router.get("/from_conversation/{conversation_id}")
+def from_conversation(conversation_id: int) -> dict[str, object]:
+    """Return full conversation data so the client can call ``init_session``."""
     conversation = session.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    tabletop.conversation = conversation
-    tabletop.messages = conversation.langchain_messages()
-    limit = min(len(tabletop.messages), 12)
-    tabletop.messages = tabletop.messages[-limit:]
-    tabletop.player = conversation.player
-    tabletop.characters = conversation.characters
-    tabletop.location = conversation.location
-    tabletop.story_background = conversation.story_background
-    # tabletop.lore_world = conversation.lore_world
-    dungeon_master.reload()
     logger.info(f"🔄 Loaded conversation {conversation_id}")
     return _conversation_response(conversation)

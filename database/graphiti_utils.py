@@ -61,7 +61,6 @@ async def insert_information(
     messages: list[AnyMessage],
     group_id: str,
     source_description: str = "conversation",
-    episode_name: str | None = None,
     perspective: str | None = None,
 ) -> None:
     """Ingest a conversation as a Graphiti episode.
@@ -80,9 +79,7 @@ async def insert_information(
         return
 
     episode_body = "\n".join(lines)
-    if perspective:
-        episode_body = f"{perspective}\n\n{episode_body}"
-    name = episode_name or f"conversation_{datetime.now(timezone.utc).isoformat()}"
+    name = f"conversation_{datetime.now(timezone.utc).isoformat()}"
 
     result = await graphiti.add_episode(
         name=name,
@@ -94,6 +91,7 @@ async def insert_information(
         entity_types=ENTITY_TYPES,
         edge_types=EDGE_TYPES,
         edge_type_map=EDGE_TYPE_MAP,
+        custom_extraction_instructions=perspective,
     )
     logger.debug(
         f"💾 Episode inserted: {len(result.nodes)} nodes, {len(result.edges)} edges"

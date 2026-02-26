@@ -1,3 +1,7 @@
+export interface MessageCreatedPayload {
+  messageId: string;
+}
+
 export interface StreamStartPayload {
   messageId: string;
   name: string;
@@ -17,13 +21,11 @@ export interface SocketErrorPayload {
 }
 
 export interface SendMessagePayload {
-  conversationId: string;
   content: string;
 }
 
 export interface InitSessionPayload {
-  playerId: number;
-  characterIds: number[];
+  conversation_id: number;
 }
 
 export interface ParticipantInfo {
@@ -32,11 +34,13 @@ export interface ParticipantInfo {
 }
 
 export interface SessionReadyPayload {
+  conversation_id: number;
   player: ParticipantInfo;
   characters: ParticipantInfo[];
 }
 
 export interface ServerToClientEvents {
+  message_created: (payload: MessageCreatedPayload) => void;
   stream_start: (payload: StreamStartPayload) => void;
   stream_token: (payload: StreamTokenPayload) => void;
   stream_end: (payload: StreamEndPayload) => void;
@@ -48,3 +52,5 @@ export interface ClientToServerEvents {
   send_message: (payload: SendMessagePayload) => void;
   init_session: (payload: InitSessionPayload) => void;
 }
+
+export type onOffType = <T extends keyof ServerToClientEvents>(event: T, handler: ServerToClientEvents[T]) => void;

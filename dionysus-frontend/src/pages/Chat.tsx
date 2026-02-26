@@ -3,11 +3,12 @@ import { Navigate } from "react-router";
 import ChatSidebar from "../components/ChatSidebar";
 import MessageInput from "../components/MessageInput";
 import TextMessage from "../components/TextMessage";
-import { useSocket } from "../hooks/useSocket";
+import { useSocketStore } from "../contexts/SocketStore";
 import { useSessionStore } from "../contexts/SessionStore";
 import { useConversationStore } from "../contexts/ConversationStore";
 import { useMessageStore } from "../contexts/MessageStore";
 import type {
+  MessageCreatedPayload,
   StreamStartPayload,
   StreamTokenPayload,
   StreamEndPayload,
@@ -20,8 +21,8 @@ interface ChatProps {
 }
 
 const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
-  const { socket } = useSocket();
-  const { messages, addUserMessage, startStream, appendToken, finalizeStream } = useMessageStore();
+  const socket = useSocketStore();
+  const { messages, addUserMessage, confirmUserMessage, startStream, appendToken, finalizeStream } = useMessageStore();
   const { player, characters } = useSessionStore();
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
   const activeConversationTitle = useConversationStore((s) => s.activeConversationTitle);
@@ -61,6 +62,10 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
   }, [messages]);
 
   useEffect(() => {
+    const handleMessageCreated = ({ messageId }: MessageCreatedPayload) => {
+      confirmUserMessage(messageId);
+    };
+
     const handleStreamStart = ({ messageId, name }: StreamStartPayload) => {
       startStream(messageId, name);
     };
@@ -73,23 +78,32 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
       finalizeStream(messageId);
     };
 
+    socket.on("message_created", handleMessageCreated);
     socket.on("stream_start", handleStreamStart);
     socket.on("stream_token", handleStreamToken);
     socket.on("stream_end", handleStreamEnd);
 
+    socket.connect();
+
     return () => {
+      socket.off("message_created", handleMessageCreated);
       socket.off("stream_start", handleStreamStart);
       socket.off("stream_token", handleStreamToken);
       socket.off("stream_end", handleStreamEnd);
     };
-  }, [socket, startStream, appendToken, finalizeStream]);
+  }, [socket, confirmUserMessage, startStream, appendToken, finalizeStream]);
+
+  useEffect(() => {
+    if (activeConversationId === null) return;
+    socket.initSession(activeConversationId);
+  }, [socket, activeConversationId]);
 
   const handleSend = useCallback(
     (text: string) => {
       addUserMessage(text, player?.name ?? "You");
-      socket.sendMessage(String(activeConversationId ?? ""), text);
+      socket.sendMessage(text);
     },
-    [socket, player, addUserMessage, activeConversationId],
+    [socket, player, addUserMessage],
   );
 
 

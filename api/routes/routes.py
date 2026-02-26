@@ -1,12 +1,12 @@
 import logging
+from uuid import UUID
 
-from fastapi import APIRouter, Body, Path
+from fastapi import APIRouter, Body, Path, Query
 from fastapi.exceptions import HTTPException
-from tools.game_tabletop import tabletop
 
 from database.models import Character, Player, Message
+from database.models.conversation import Conversation
 from database.postgres_connection import session
-from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -25,30 +25,45 @@ def get_characters() -> list[dict[str, object]]:
     return [{"id": c.id, "name": c.name} for c in characters]
 
 
-@router.get('/story_background')
-def get_story_background() -> dict[str, str]:
-    return {"story_background": tabletop.story_background or ""}
+def _get_conversation(conversation_id: int) -> Conversation:
+    conversation = session.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conversation:
+        raise HTTPException(status_code=404, detail=f"Conversation {conversation_id} not found")
+    return conversation
 
-@router.put("/story_background", status_code=200)
-def update_story_background(story_background: str = Body(..., embed=True)) -> dict[str, str]:
-    tabletop.story_background = tabletop.conversation.story_background = story_background
+
+@router.get('/conversations/{conversation_id}/story_background')
+def get_story_background(conversation_id: int) -> dict[str, str]:
+    conversation = _get_conversation(conversation_id)
+    return {"story_background": conversation.story_background or ""}
+
+
+@router.put("/conversations/{conversation_id}/story_background", status_code=200)
+def update_story_background(conversation_id: int, story_background: str = Body(..., embed=True)) -> dict[str, str]:
+    conversation = _get_conversation(conversation_id)
+    conversation.story_background = story_background
     session.commit()
-    logger.info(f"📜 Story background saved to conversation {tabletop.conversation.id}")
+    logger.info(f"📜 Story background saved to conversation {conversation.id}")
     return {"message": "Story background updated"}
 
-@router.get('/location')
-def get_location() -> dict[str, str]:
-    return {"location": tabletop.location or ""}
 
-@router.put("/location", status_code=200)
-def update_location(location: str = Body(..., embed=True)) -> dict[str, str]:
-    tabletop.location = tabletop.conversation.location = location
+@router.get('/conversations/{conversation_id}/location')
+def get_location(conversation_id: int) -> dict[str, str]:
+    conversation = _get_conversation(conversation_id)
+    return {"location": conversation.location or ""}
+
+
+@router.put("/conversations/{conversation_id}/location", status_code=200)
+def update_location(conversation_id: int, location: str = Body(..., embed=True)) -> dict[str, str]:
+    conversation = _get_conversation(conversation_id)
+    conversation.location = location
     session.commit()
-    logger.info(f"📍 Location saved to conversation {tabletop.conversation.id}")
+    logger.info(f"📍 Location saved to conversation {conversation.id}")
     return {"message": "Location updated"}
 
+
 @router.put('/messages/{message_id}', status_code=200)
-def edit_message(message_id: UUID = Path(..., embed=True), content: str = Body(..., embed=True)) -> dict[str, str]:
+def edit_message(message_id: UUID = Path(...), content: str = Body(..., embed=True)) -> dict[str, str]:
     message = session.query(Message).filter(Message.id == message_id).first()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -57,8 +72,9 @@ def edit_message(message_id: UUID = Path(..., embed=True), content: str = Body(.
     logger.info(f"📝 Message {message_id} edited")
     return {"message": "Message edited"}
 
+
 @router.delete('/messages/{message_id}', status_code=200)
-def delete_message(message_id: UUID = Path(..., embed=True)) -> dict[str, str]:
+def delete_message(message_id: UUID = Path(...)) -> dict[str, str]:
     message = session.query(Message).filter(Message.id == message_id).first()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")

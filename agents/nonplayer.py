@@ -12,9 +12,9 @@ from hephaestus.helpers import Oligaton
 
 from database.graphiti_utils import load_information, make_group_id, insert_information
 from database.models import Character as CharacterModel
+from database.models.conversation import Conversation
 from tools.dice import roll_d20, roll_d10, roll_d6
-from tools import tabletop
-from utils.prompts import plan_prompt_template, narrator_prompt_template, emotions_prompt_template, should_respond_prompt_template  
+from utils.prompts import plan_prompt_template, narrator_prompt_template, emotions_prompt_template, should_respond_prompt_template, character_episodic_memory
 
 logger = getLogger(__name__)
 
@@ -40,10 +40,10 @@ class EmotionalState(BaseModel, metaclass=Oligaton):
     hope: int = Field(default=0, ge=-20, le=20, description="Intensity of positive expectation for outcomes.")
 
 
-def spawn_npc(character: CharacterModel) -> StateGraph:
+def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGraph:
 
     other_characters = [f"**{c.name}**:\n{c.description}" 
-                        for c in tabletop.characters 
+                        for c in conversation.characters 
                         if c.id != character.id]
 
     other_characters = '\n\n\n'.join(other_characters)
@@ -59,9 +59,14 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
 
         @property
         def combined_messages(self) -> list[AnyMessage]:
-            combo = [*tabletop.messages, *self.messages]
+            combo = [*conversation.message_buffer, *self.messages]
             limit = min(12, len(combo))
             return combo[-limit:]
+
+        @property
+        def emotional_state(self) -> str:
+            raw = emotional_state.model_dump(exclude_unset=True)
+            return '\n'.join(f"{k}: {v}" for k, v in raw.items())
 
         @property
         def combined_dump(self) -> dict:
@@ -69,11 +74,11 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
                 'name': character.name,
                 'description': character.description,
                 'other_characters': other_characters,
-                'player': tabletop.player.description,
-                'location': tabletop.location,
-                'story_background': tabletop.story_background,
+                'player': conversation.player.description,
+                'location': conversation.location,
+                'story_background': conversation.story_background,
                 'messages': self.combined_messages,
-                'emotional_state': emotional_state.model_dump(exclude_unset=True),
+                'emotional_state': self.emotional_state,
                 **self.model_dump(exclude={'messages'}),
             }
     
@@ -95,7 +100,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
     #     last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
     #     lore = await load_information(
     #         query=last_human_message.content,
-    #         group_ids=[make_group_id("lore", tabletop.lore_world)],
+    #         group_ids=[make_group_id("lore", conversation.lore_world)],
     #     )
 
     #     return {'lore': lore, 'messages': []}
@@ -106,7 +111,7 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
             query=last_human_message.content,
             group_ids=[
                 make_group_id("memories", character.name),
-                make_group_id("lore", tabletop.lore_world),
+                make_group_id("lore", conversation.lore_world),
             ],
             limit=20,
         )
@@ -132,11 +137,11 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
 
         prompt = await plan_prompt_template.ainvoke({
             **state.combined_dump,
-            'emotional_state': emotional_state.model_dump(exclude_unset=False),
+            'emotional_state': state.emotional_state,
             })
         logger.debug(f"🧠 Planner prompt: {prompt}")
 
-        thoughts = await get_model(top_p=0.7, temperature=0.8, max_tokens=1024).ainvoke(prompt)
+        thoughts = await get_model(top_p=0.95, temperature=0.8, max_tokens=1024).ainvoke(prompt)
         if thoughts.content is None:
             logger.warning("🧠 Planner returned None, using empty Thoughts")
         logger.info(f"🧠 Planner response: {thoughts.content[:min(200, len(thoughts.content))]}...")
@@ -147,17 +152,20 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
 
         prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
 
-        response = await get_model(top_p=0.7).ainvoke(prompt)
+        response = await get_model(top_p=1).ainvoke(prompt)
         # if not response.content.startswith(f"**{character.name}**: "):
         #     response.content = f"**{character.name}**: {response.content}"
         response.name = character.name
         response.id = str(uuid4())
-        await insert_information(
-            messages=state.combined_messages,
-            group_id=make_group_id("memories", character.name),
-            source_description=f"session:{tabletop.lore_world}",
-            perspective=f"Extract facts relevant to {character.name}: {character.description[:120]}",
-        )
+        try:
+            await insert_information(
+                messages=state.combined_messages,
+                group_id=make_group_id("memories", character.name),
+                source_description=f"session:{conversation.lore_world}",
+                perspective=character_episodic_memory.compile(name=character.name, description=character.description),
+            )
+        except Exception as e:
+            logger.exception(f"❌ Error inserting information:")
         return {'messages': [response]}
 
     graph = StateGraph(NPCState)

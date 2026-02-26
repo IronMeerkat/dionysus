@@ -49,20 +49,20 @@ export class SocketService {
     }
   }
 
-  sendMessage(conversationId: string, content: string): void {
+  sendMessage(content: string): void {
     if (!this.socket?.connected) {
       console.error("❌ SocketService: cannot send — not connected");
       return;
     }
-    this.socket.emit("send_message", { conversationId, content });
+    this.socket.emit("send_message", { content });
   }
 
-  initSession(playerId: number, characterIds: number[]): void {
+  initSession(conversationId: number): void {
     if (!this.socket?.connected) {
       console.error("❌ SocketService: cannot init session — not connected");
       return;
     }
-    this.socket.emit("init_session", { playerId, characterIds });
+    this.socket.emit("init_session", { conversation_id: conversationId });
   }
 
   on<E extends keyof ServerToClientEvents>(

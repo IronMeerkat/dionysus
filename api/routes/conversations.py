@@ -2,12 +2,9 @@ import logging
 
 from fastapi import APIRouter, Body, Query
 from fastapi.exceptions import HTTPException
-from tools.game_tabletop import tabletop
 
-from database.models import Character, Player, Conversation
+from database.models import Conversation
 from database.postgres_connection import session
-
-from agents.dungeon_master import dungeon_master
 
 logger = logging.getLogger(__name__)
 
