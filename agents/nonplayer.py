@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from hephaestus.helpers import Oligaton
 
-from database.mem0_utils import load_information
+from database.graphiti_utils import load_information, make_group_id, insert_information
 from database.models import Character as CharacterModel
 from tools.dice import roll_d20, roll_d10, roll_d6
 from tools import tabletop
@@ -86,28 +86,29 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
         response = await decision_model.ainvoke(prompt)
         if response.should_respond:
             logger.info(f"✅ {character.name} decided to respond")
-            return ["lore_loader", "memories_loader"]
+            # return ["lore_loader", "memories_loader"]
+            return ["memories_loader"]
         logger.info(f"🚫 {character.name} decided NOT to respond")
         return END
 
-    async def lore_loader(state: NPCState) -> NPCState:
-        last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
-        lore = await load_information(
-            query=last_human_message.content,
-            metadata_filters={"memory_subcategory": "lore", "world": tabletop.lore_world},
-            rerank_threshold=0.7,
-            limit=7,
-        )
+    # async def lore_loader(state: NPCState) -> NPCState:
+    #     last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
+    #     lore = await load_information(
+    #         query=last_human_message.content,
+    #         group_ids=[make_group_id("lore", tabletop.lore_world)],
+    #     )
 
-        return {'lore': lore, 'messages': []}
+    #     return {'lore': lore, 'messages': []}
 
     async def memories_loader(state: NPCState) -> NPCState:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
         memories = await load_information(
             query=last_human_message.content,
-            metadata_filters={"memory_subcategory": "memories", "agent": character.name},
-            rerank_threshold=0.6,
-            limit=7,
+            group_ids=[
+                make_group_id("memories", character.name),
+                make_group_id("lore", tabletop.lore_world),
+            ],
+            limit=20,
         )
 
         return {'memories': memories, 'messages': []}
@@ -151,17 +152,24 @@ def spawn_npc(character: CharacterModel) -> StateGraph:
         #     response.content = f"**{character.name}**: {response.content}"
         response.name = character.name
         response.id = str(uuid4())
+        await insert_information(
+            messages=state.combined_messages,
+            group_id=make_group_id("memories", character.name),
+            source_description=f"session:{tabletop.lore_world}",
+            perspective=f"Extract facts relevant to {character.name}: {character.description[:120]}",
+        )
         return {'messages': [response]}
 
     graph = StateGraph(NPCState)
-    graph.add_node("lore_loader", lore_loader)
+    # graph.add_node("lore_loader", lore_loader)
     graph.add_node("memories_loader", memories_loader)
     graph.add_node("emotion_updater", emotion_updater)
     graph.add_node("planner", planner)
 
     graph.add_node("npc_narrator", npc_narrator)
     graph.add_conditional_edges(START, should_respond)
-    graph.add_edge(["lore_loader", "memories_loader"], "emotion_updater")
+    # graph.add_edge(["lore_loader", "memories_loader"], "emotion_updater")
+    graph.add_edge("memories_loader", "emotion_updater")
     graph.add_edge("emotion_updater", "planner")
 
     graph.add_edge("planner", "npc_narrator")

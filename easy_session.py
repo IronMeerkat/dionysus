@@ -1,9 +1,8 @@
-import asyncio
 from logging import getLogger
 
 from hephaestus.logging import init_logger
 init_logger()
-from database.initialize_mem0 import memory
+from database.graphiti_utils import wipe_agent_memories as _graphiti_wipe, make_group_id
 from database.postgres_connection import session
 from database.models import Player, Character
 from hephaestus.langfuse_handler import langfuse_callback_handler
@@ -14,31 +13,13 @@ from langchain_core.messages import HumanMessage
 logger = getLogger(__name__)
 
 
-async def wipe_agent_memories(agent_name: str= None) -> int:
-    """Deletes all memories with metadata `memory_subcategory=memories` for the given agent name.
+async def wipe_agent_memories(agent_name: str) -> int:
+    """Deletes all Graphiti episodes for the given agent's memory group.
 
-    Returns the number of memories deleted.
+    Returns the number of episodes deleted.
     """
-    filters = [{"memory_subcategory": "memories"}]
-    if agent_name:
-        filters.append({"agent": agent_name})
-
-    all_memories = await memory.get_all(
-        user_id="user",
-        filters={"AND": filters},
-        limit=10_000,
-    )
-
-    results = all_memories.get("results", [])
-    if not results:
-        logger.info(f"🗑️ No memories found for agent '{agent_name}'")
-        return 0
-
-    logger.info(f"🗑️ Deleting {len(results)} memories for agent '{agent_name}'...")
-    tasks = [asyncio.create_task(memory.delete(m["id"])) for m in results]
-    await asyncio.gather(*tasks)
-    logger.info(f"✅ Successfully wiped {len(results)} memories for agent '{agent_name}'")
-    return len(results)
+    group_id = make_group_id("memories", agent_name)
+    return await _graphiti_wipe(group_id)
 
 
 class EasySession:

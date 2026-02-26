@@ -55,7 +55,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
 
         try:
             stream = dungeon_master.graph.astream(
-                {"messages": [HumanMessage(content=content)]},
+                {"messages": [HumanMessage(content=content, name=tabletop.player.name)]},
                 stream_mode="messages",
                 config=config,
                 subgraphs=True,

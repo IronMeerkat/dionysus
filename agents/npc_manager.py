@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from hephaestus.helpers import Oligaton
 
-from database.initialize_mem0 import memory
+from database.graphiti_utils import load_information, make_group_id
 from tools.game_tabletop import tabletop
 from tools.npc_management import create_character
 from utils.prompts import npc_creator_prompt_template
@@ -26,21 +26,23 @@ class NPCManagerState(BaseModel):
 
 
 async def memories_loader(state: NPCManagerState) -> NPCManagerState:
-    last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage)) 
-    lore = (await memory.search( # TODO should be AI or tool call, keep human for now
-        query=last_human_message.content,
-        user_id="user",
-        filters={'world': tabletop.lore_world}, rerank=True))['results']
-    limit = min(20, len(lore))
-    lore = lore[:limit]
+    last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
 
-    episodic_memories = (await memory.search(
+    lore = await load_information(
         query=last_human_message.content,
-        user_id="user",
-        filters={'agent': {'in': [c.name for c in tabletop.characters]}},
-        rerank=True))['results']
+        group_ids=[make_group_id("lore", tabletop.lore_world)],
+        limit=20,
+    )
 
-    return {'memories': '\n'.join([m['memory'] for m in [*episodic_memories, *lore]]), 'messages': []}
+    character_group_ids = [make_group_id("memories", c.name) for c in tabletop.characters]
+    episodic_memories = await load_information(
+        query=last_human_message.content,
+        group_ids=character_group_ids,
+        limit=10,
+    )
+
+    combined = "\n".join(part for part in [episodic_memories, lore] if part)
+    return {'memories': combined, 'messages': []}
 
 
 async def agent_node(state: NPCManagerState) -> dict:

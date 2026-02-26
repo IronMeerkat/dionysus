@@ -14,11 +14,11 @@ from logging import getLogger
 from hephaestus.agent_architectures import create_daisy_chain, wrap_agent_return_delta
 from hephaestus.helpers import Singleton
 
-from database.mem0_utils import insert_information
+from database.graphiti_utils import insert_information, make_group_id
 from database.models import Character as CharacterModel, Player as PlayerModel
 from database.postgres_connection import session
 from tools import tabletop
-from utils.prompts import character_episodic_memory, scene_change_prompt_template
+from utils.prompts import scene_change_prompt_template
 from agents.nonplayer import spawn_npc
 
 logger = getLogger(__name__)
@@ -75,23 +75,22 @@ def spawn_dungeon_master(*characters: CharacterModel, player: PlayerModel, name:
         #         scene_change = result.scene_changed
 
 
-        if len(tabletop.conversation.messages) % 10 == 0:
-            tasks = [
-                asyncio.create_task(
-                        insert_information(
-                        messages=tabletop.messages,
-                        metadata_filters={"memory_subcategory": "memories",
-                                                  "agent": character.name, 
-                                                  "world": tabletop.lore_world},
-                        prompt=character_episodic_memory.compile(name=character.name)
-                    )
-                )
-                for character in tabletop.characters
-            ]
-            await asyncio.gather(*tasks)
+        # if len(tabletop.conversation.messages) % 10 == 0:
+        # tasks = [
+        #     asyncio.create_task(
+        #         insert_information(
+        #             messages=state.messages,
+        #             group_id=make_group_id("memories", character.name),
+        #             source_description=f"session:{tabletop.lore_world}",
+        #             perspective=f"Extract facts relevant to {character.name}: {character.description[:120]}",
+        #         )
+        #     )
+        #     for character in tabletop.characters
+        # ]
+        # await asyncio.gather(*tasks)
         
-        else:
-            logger.debug("🔄 No scene change detected, continuing...")
+        # else:
+        #     logger.debug("🔄 No scene change detected, continuing...")
         
         tabletop.messages.extend(state.messages)
 
