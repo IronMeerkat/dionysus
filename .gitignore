@@ -11,4 +11,3 @@ wheels/
 .chainlit
 settings.yaml
 sandbox.ipynb
-database/persistent_mem0/**

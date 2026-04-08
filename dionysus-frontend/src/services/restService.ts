@@ -131,59 +131,46 @@ export const restService = {
     return request<WorldResponse[]>("/lore/worlds");
   },
 
-  createWorld(name: string, description: string): Promise<WorldResponse> {
+  createWorld(name: string): Promise<WorldResponse> {
     return request<WorldResponse>("/lore/worlds", {
       method: "POST",
-      body: { name, description },
+      body: { name },
     });
   },
 
-  updateWorld(worldId: number, name: string, description: string): Promise<WorldResponse> {
-    return request<WorldResponse>(`/lore/worlds/${worldId}`, {
-      method: "PUT",
-      body: { name, description },
-    });
-  },
-
-  deleteWorld(worldId: number): Promise<MessageResponse> {
-    return request<MessageResponse>(`/lore/worlds/${worldId}`, {
+  deleteWorld(worldName: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/lore/worlds/${encodeURIComponent(worldName)}`, {
       method: "DELETE",
     });
   },
 
   // ---- Lore: Entries ----
 
-  getWorldEntries(worldId: number): Promise<LoreEntryListItem[]> {
-    return request<LoreEntryListItem[]>(`/lore/worlds/${worldId}/entries`);
+  getWorldEntries(worldName: string): Promise<LoreEntryListItem[]> {
+    return request<LoreEntryListItem[]>(`/lore/worlds/${encodeURIComponent(worldName)}/entries`);
   },
 
-  getEntry(entryId: number): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/lore/entries/${entryId}`);
+  getEntry(uuid: string): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/entries/${uuid}`);
   },
 
-  createEntry(worldId: number, title: string, content: string, category: string | null): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/lore/worlds/${worldId}/entries`, {
+  createEntry(worldName: string, title: string, content: string): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/worlds/${encodeURIComponent(worldName)}/entries`, {
       method: "POST",
-      body: { title, content, category },
+      body: { title, content },
     });
   },
 
-  updateEntry(entryId: number, title: string, content: string, category: string | null): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/lore/entries/${entryId}`, {
+  updateEntry(uuid: string, title: string, content: string): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/entries/${uuid}`, {
       method: "PUT",
-      body: { title, content, category },
+      body: { title, content },
     });
   },
 
-  deleteEntry(entryId: number): Promise<MessageResponse> {
-    return request<MessageResponse>(`/lore/entries/${entryId}`, {
+  deleteEntry(uuid: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/lore/entries/${uuid}`, {
       method: "DELETE",
-    });
-  },
-
-  reingestEntry(entryId: number): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/lore/entries/${entryId}/reingest`, {
-      method: "POST",
     });
   },
 

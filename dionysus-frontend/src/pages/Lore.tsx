@@ -6,66 +6,33 @@ import type {
   WorldResponse,
   LoreEntryListItem,
   LoreEntryResponse,
-  IngestionStatus,
 } from "../types/rest";
-
-const CATEGORIES = [
-  "character",
-  "location",
-  "organization",
-  "nation",
-  "race",
-  "concept",
-  "creature",
-  "item",
-  "event",
-  "general",
-] as const;
 
 type EditorMode = "idle" | "create" | "edit";
 
 interface EntryDraft {
   title: string;
   content: string;
-  category: string;
 }
 
-const EMPTY_DRAFT: EntryDraft = { title: "", content: "", category: "general" };
-
-const STATUS_STYLES: Record<IngestionStatus, string> = {
-  pending: "badge badge-warning badge-sm",
-  ingested: "badge badge-success badge-sm",
-  failed: "badge badge-error badge-sm",
-};
-
-const STATUS_LABELS: Record<IngestionStatus, string> = {
-  pending: "Pending",
-  ingested: "Ingested",
-  failed: "Failed",
-};
+const EMPTY_DRAFT: EntryDraft = { title: "", content: "" };
 
 const Lore = () => {
   const navigate = useNavigate();
 
   // ---- worlds ----
   const [worlds, setWorlds] = useState<WorldResponse[]>([]);
-  const [selectedWorldId, setSelectedWorldId] = useState<number | null>(null);
+  const [selectedWorld, setSelectedWorld] = useState<string | null>(null);
   const [worldFormOpen, setWorldFormOpen] = useState(false);
   const [newWorldName, setNewWorldName] = useState("");
-  const [newWorldDesc, setNewWorldDesc] = useState("");
 
   // ---- entries ----
   const [entries, setEntries] = useState<LoreEntryListItem[]>([]);
-  const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null);
+  const [selectedEntryUuid, setSelectedEntryUuid] = useState<string | null>(null);
 
   // ---- editor ----
   const [editorMode, setEditorMode] = useState<EditorMode>("idle");
   const [draft, setDraft] = useState<EntryDraft>(EMPTY_DRAFT);
-
-  // ---- ingestion status for selected entry ----
-  const [selectedIngestionStatus, setSelectedIngestionStatus] =
-    useState<IngestionStatus>("pending");
-  const [reingesting, setReingesting] = useState(false);
 
   // ---- loading / errors ----
   const [loading, setLoading] = useState(true);
@@ -78,7 +45,7 @@ const Lore = () => {
       .getWorlds()
       .then((w) => {
         setWorlds(w);
-        if (w.length > 0) setSelectedWorldId(w[0].id);
+        if (w.length > 0) setSelectedWorld(w[0].name);
       })
       .catch((err) => {
         console.error("Failed to fetch worlds", err);
@@ -89,18 +56,18 @@ const Lore = () => {
 
   // ---- fetch entries when world changes ----
   useEffect(() => {
-    if (selectedWorldId === null) {
+    if (selectedWorld === null) {
       setEntries([]);
       return;
     }
     restService
-      .getWorldEntries(selectedWorldId)
+      .getWorldEntries(selectedWorld)
       .then(setEntries)
       .catch((err) => {
         console.error("Failed to fetch entries", err);
         setError("Could not load entries.");
       });
-  }, [selectedWorldId]);
+  }, [selectedWorld]);
 
   // ---- world CRUD ----
   const handleCreateWorld = useCallback(async () => {
@@ -108,14 +75,10 @@ const Lore = () => {
     setSaving(true);
     setError(null);
     try {
-      const created = await restService.createWorld(
-        newWorldName.trim(),
-        newWorldDesc.trim(),
-      );
+      const created = await restService.createWorld(newWorldName.trim());
       setWorlds((prev) => [...prev, created]);
-      setSelectedWorldId(created.id);
+      setSelectedWorld(created.name);
       setNewWorldName("");
-      setNewWorldDesc("");
       setWorldFormOpen(false);
     } catch (err) {
       console.error("Failed to create world", err);
@@ -123,111 +86,94 @@ const Lore = () => {
     } finally {
       setSaving(false);
     }
-  }, [newWorldName, newWorldDesc]);
+  }, [newWorldName]);
 
   const handleDeleteWorld = useCallback(async () => {
-    if (selectedWorldId === null) return;
-    const world = worlds.find((w) => w.id === selectedWorldId);
-    if (!world) return;
-    if (!confirm(`Delete world "${world.name}" and all its entries?`)) return;
+    if (selectedWorld === null) return;
+    if (!confirm(`Delete world "${selectedWorld}" and all its entries?`)) return;
     setError(null);
     try {
-      await restService.deleteWorld(selectedWorldId);
-      setWorlds((prev) => prev.filter((w) => w.id !== selectedWorldId));
-      setSelectedWorldId(null);
+      await restService.deleteWorld(selectedWorld);
+      setWorlds((prev) => prev.filter((w) => w.name !== selectedWorld));
+      setSelectedWorld(null);
       setEntries([]);
       resetEditor();
     } catch (err) {
       console.error("Failed to delete world", err);
       setError("Could not delete world.");
     }
-  }, [selectedWorldId, worlds]);
+  }, [selectedWorld]);
 
   // ---- entry selection ----
-  const handleSelectEntry = useCallback(
-    async (entryId: number) => {
-      setError(null);
-      try {
-        const full: LoreEntryResponse = await restService.getEntry(entryId);
-        setSelectedEntryId(full.id);
-        setSelectedIngestionStatus(full.ingestion_status);
-        setDraft({
-          title: full.title,
-          content: full.content,
-          category: full.category ?? "general",
-        });
-        setEditorMode("edit");
-      } catch (err) {
-        console.error("Failed to load entry", err);
-        setError("Could not load entry.");
-      }
-    },
-    [],
-  );
+  const handleSelectEntry = useCallback(async (uuid: string) => {
+    setError(null);
+    try {
+      const full: LoreEntryResponse = await restService.getEntry(uuid);
+      setSelectedEntryUuid(full.uuid);
+      setDraft({
+        title: full.title,
+        content: full.content,
+      });
+      setEditorMode("edit");
+    } catch (err) {
+      console.error("Failed to load entry", err);
+      setError("Could not load entry.");
+    }
+  }, []);
 
   // ---- editor helpers ----
   const resetEditor = useCallback(() => {
     setEditorMode("idle");
-    setSelectedEntryId(null);
+    setSelectedEntryUuid(null);
     setDraft(EMPTY_DRAFT);
-    setSelectedIngestionStatus("pending");
-    setReingesting(false);
   }, []);
 
   const handleNewEntry = useCallback(() => {
-    setSelectedEntryId(null);
+    setSelectedEntryUuid(null);
     setDraft(EMPTY_DRAFT);
     setEditorMode("create");
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (selectedWorldId === null) return;
+    if (selectedWorld === null) return;
     if (!draft.title.trim() || !draft.content.trim()) return;
     setSaving(true);
     setError(null);
     try {
       if (editorMode === "create") {
         const created = await restService.createEntry(
-          selectedWorldId,
+          selectedWorld,
           draft.title.trim(),
           draft.content.trim(),
-          draft.category || null,
         );
         setEntries((prev) => [
           ...prev,
           {
-            id: created.id,
+            uuid: created.uuid,
             title: created.title,
-            category: created.category,
-            ingestion_status: created.ingestion_status,
             created_at: created.created_at,
-            updated_at: created.updated_at,
           },
         ]);
-        setSelectedEntryId(created.id);
-        setSelectedIngestionStatus(created.ingestion_status);
+        setSelectedEntryUuid(created.uuid);
         setEditorMode("edit");
-      } else if (editorMode === "edit" && selectedEntryId !== null) {
+      } else if (editorMode === "edit" && selectedEntryUuid !== null) {
         const updated = await restService.updateEntry(
-          selectedEntryId,
+          selectedEntryUuid,
           draft.title.trim(),
           draft.content.trim(),
-          draft.category || null,
         );
         setEntries((prev) =>
           prev.map((e) =>
-            e.id === updated.id
+            e.uuid === selectedEntryUuid
               ? {
-                  id: updated.id,
+                  uuid: updated.uuid,
                   title: updated.title,
-                  category: updated.category,
-                  ingestion_status: updated.ingestion_status,
                   created_at: updated.created_at,
-                  updated_at: updated.updated_at,
                 }
               : e,
           ),
         );
+        setSelectedEntryUuid(updated.uuid);
       }
     } catch (err) {
       console.error("Failed to save entry", err);
@@ -235,43 +181,21 @@ const Lore = () => {
     } finally {
       setSaving(false);
     }
-  }, [selectedWorldId, editorMode, selectedEntryId, draft]);
-
-  const handleReingest = useCallback(async () => {
-    if (selectedEntryId === null) return;
-    setReingesting(true);
-    setError(null);
-    try {
-      const updated = await restService.reingestEntry(selectedEntryId);
-      setSelectedIngestionStatus(updated.ingestion_status);
-      setEntries((prev) =>
-        prev.map((e) =>
-          e.id === updated.id
-            ? { ...e, ingestion_status: updated.ingestion_status }
-            : e,
-        ),
-      );
-    } catch (err) {
-      console.error("Failed to reingest entry", err);
-      setError("Could not re-trigger ingestion.");
-    } finally {
-      setReingesting(false);
-    }
-  }, [selectedEntryId]);
+  }, [selectedWorld, editorMode, selectedEntryUuid, draft]);
 
   const handleDeleteEntry = useCallback(async () => {
-    if (selectedEntryId === null) return;
+    if (selectedEntryUuid === null) return;
     if (!confirm("Delete this lore entry?")) return;
     setError(null);
     try {
-      await restService.deleteEntry(selectedEntryId);
-      setEntries((prev) => prev.filter((e) => e.id !== selectedEntryId));
+      await restService.deleteEntry(selectedEntryUuid);
+      setEntries((prev) => prev.filter((e) => e.uuid !== selectedEntryUuid));
       resetEditor();
     } catch (err) {
       console.error("Failed to delete entry", err);
       setError("Could not delete entry.");
     }
-  }, [selectedEntryId, resetEditor]);
+  }, [selectedEntryUuid, resetEditor]);
 
   // ---- render ----
 
@@ -300,15 +224,14 @@ const Lore = () => {
               >
                 {worldFormOpen ? "Cancel" : "+ New World"}
               </button>
-              {selectedWorldId !== null && (
+              {selectedWorld !== null && (
                 <>
                   <button
                     type="button"
                     className="btn btn-sm btn-outline btn-secondary"
-                    onClick={() => {
-                      const world = worlds.find((w) => w.id === selectedWorldId);
-                      if (world) navigate(`/lore-chat?world=${encodeURIComponent(world.name)}`);
-                    }}
+                    onClick={() =>
+                      navigate(`/lore-chat?world=${encodeURIComponent(selectedWorld)}`)
+                    }
                   >
                     AI Assistant
                   </button>
@@ -333,13 +256,6 @@ const Lore = () => {
                 value={newWorldName}
                 onChange={(e) => setNewWorldName(e.target.value)}
               />
-              <input
-                type="text"
-                className="input input-sm w-full"
-                placeholder="Description (optional)"
-                value={newWorldDesc}
-                onChange={(e) => setNewWorldDesc(e.target.value)}
-              />
               <button
                 type="button"
                 className="btn btn-sm btn-primary"
@@ -354,10 +270,9 @@ const Lore = () => {
           {worlds.length > 0 ? (
             <select
               className="select select-sm w-full"
-              value={selectedWorldId ?? ""}
+              value={selectedWorld ?? ""}
               onChange={(e) => {
-                const val = Number(e.target.value);
-                setSelectedWorldId(val || null);
+                setSelectedWorld(e.target.value || null);
                 resetEditor();
               }}
             >
@@ -365,7 +280,7 @@ const Lore = () => {
                 Select a world
               </option>
               {worlds.map((w) => (
-                <option key={w.id} value={w.id}>
+                <option key={w.name} value={w.name}>
                   {w.name} ({w.entry_count} entries)
                 </option>
               ))}
@@ -378,7 +293,7 @@ const Lore = () => {
         </div>
 
         {/* ---- Entries List ---- */}
-        {selectedWorldId !== null && (
+        {selectedWorld !== null && (
           <div className="lore-section">
             <div className="lore-section-header">
               <h2 className="lore-section-title">Entries</h2>
@@ -395,20 +310,12 @@ const Lore = () => {
               <div className="lore-entries-list">
                 {entries.map((entry) => (
                   <button
-                    key={entry.id}
+                    key={entry.uuid}
                     type="button"
-                    className={`lore-entry-row ${selectedEntryId === entry.id ? "selected" : ""}`}
-                    onClick={() => handleSelectEntry(entry.id)}
+                    className={`lore-entry-row ${selectedEntryUuid === entry.uuid ? "selected" : ""}`}
+                    onClick={() => handleSelectEntry(entry.uuid)}
                   >
                     <span className="lore-entry-title">{entry.title}</span>
-                    <span className="lore-entry-badges">
-                      {entry.category && (
-                        <span className="lore-entry-badge">{entry.category}</span>
-                      )}
-                      <span className={STATUS_STYLES[entry.ingestion_status]}>
-                        {STATUS_LABELS[entry.ingestion_status]}
-                      </span>
-                    </span>
                   </button>
                 ))}
               </div>
@@ -419,17 +326,12 @@ const Lore = () => {
         )}
 
         {/* ---- Entry Editor ---- */}
-        {editorMode !== "idle" && selectedWorldId !== null && (
+        {editorMode !== "idle" && selectedWorld !== null && (
           <div className="lore-section">
             <div className="lore-section-header">
               <h2 className="lore-section-title">
                 {editorMode === "create" ? "New Entry" : "Edit Entry"}
               </h2>
-              {editorMode === "edit" && (
-                <span className={STATUS_STYLES[selectedIngestionStatus]}>
-                  {STATUS_LABELS[selectedIngestionStatus]}
-                </span>
-              )}
             </div>
 
             <div className="lore-editor-form">
@@ -443,23 +345,6 @@ const Lore = () => {
                     setDraft((d) => ({ ...d, title: e.target.value }))
                   }
                 />
-              </label>
-
-              <label className="lore-label">
-                Category
-                <select
-                  className="select select-sm w-full"
-                  value={draft.category}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, category: e.target.value }))
-                  }
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c.charAt(0).toUpperCase() + c.slice(1)}
-                    </option>
-                  ))}
-                </select>
               </label>
 
               <label className="lore-label">
@@ -492,26 +377,14 @@ const Lore = () => {
                 >
                   Cancel
                 </button>
-                {editorMode === "edit" && selectedEntryId !== null && (
-                  <>
-                    {selectedIngestionStatus === "failed" && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-warning"
-                        disabled={reingesting}
-                        onClick={handleReingest}
-                      >
-                        {reingesting ? "Retrying..." : "Retry Ingestion"}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-error"
-                      onClick={handleDeleteEntry}
-                    >
-                      Delete
-                    </button>
-                  </>
+                {editorMode === "edit" && selectedEntryUuid !== null && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-error"
+                    onClick={handleDeleteEntry}
+                  >
+                    Delete
+                  </button>
                 )}
               </div>
             </div>

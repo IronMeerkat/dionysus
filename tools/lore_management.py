@@ -1,23 +1,16 @@
-import asyncio
-from datetime import datetime, timezone
-from logging import getLogger
 import re
+from logging import getLogger
 
 from langchain.tools import tool
 
 from database.graphiti_utils import load_information, make_group_id
-from database.graphiti_types import ENTITY_TYPES, EDGE_TYPES, EDGE_TYPE_MAP
-from database.init_graphiti import graphiti
-from database.models.world import LoreEntry, World
-from database.postgres_connection import Session, session
-
-from graphiti_core.nodes import EpisodeType
+from database.graphiti_types import ENTITY_TYPES
+from database.neo4j_lore import create_entry, delete_entry, get_entry
 
 logger = getLogger(__name__)
 
-RETRY_DELAYS = [5, 15, 45]
-TARGET_ENTRY_MIN_WORDS = 120
-TARGET_ENTRY_MAX_WORDS = 250
+TARGET_ENTRY_MIN_WORDS = 40
+TARGET_ENTRY_MAX_WORDS = 70
 
 
 def _word_count(text: str) -> int:
@@ -94,71 +87,6 @@ def _split_lore_content(content: str) -> list[str]:
     return [chunk for chunk in chunks if chunk]
 
 
-def _update_ingestion_status(entry_id: int, status: str) -> None:
-    """Update the ingestion_status on a LoreEntry using a short-lived session."""
-    db = Session()
-    try:
-        entry = db.query(LoreEntry).filter(LoreEntry.id == entry_id).first()
-        if entry is not None:
-            entry.ingestion_status = status
-            db.commit()
-            logger.info(f"📊 Updated ingestion_status for entry {entry_id} -> '{status}'")
-        else:
-            logger.warning(f"⚠️ Entry {entry_id} not found when updating ingestion_status")
-    except Exception:
-        logger.exception(f"❌ Failed to update ingestion_status for entry {entry_id}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-def spawn_ingestion_task(
-    entry_id: int,
-    title: str,
-    content: str,
-    world_name: str,
-    group_id: str,
-) -> asyncio.Task[None]:
-    """Fire-and-forget Graphiti ingestion with retry + status tracking.
-
-    Returns the asyncio.Task so callers can optionally await it in tests.
-    """
-
-    async def _ingest_background() -> None:
-        for attempt in range(len(RETRY_DELAYS) + 1):
-            try:
-                await graphiti.add_episode(
-                    name=title,
-                    episode_body=content,
-                    source=EpisodeType.text,
-                    source_description=f"lore_creator:{world_name}",
-                    reference_time=datetime.now(timezone.utc),
-                    group_id=group_id,
-                    entity_types=ENTITY_TYPES,
-                    edge_types=EDGE_TYPES,
-                    edge_type_map=EDGE_TYPE_MAP,
-                )
-                _update_ingestion_status(entry_id, "ingested")
-                logger.info(f"📜 Ingested '{title}' into Graphiti (group_id={group_id!r})")
-                return
-            except Exception:
-                if attempt < len(RETRY_DELAYS):
-                    delay = RETRY_DELAYS[attempt]
-                    logger.warning(
-                        f"⚠️ Graphiti ingestion attempt {attempt + 1} failed for '{title}', "
-                        f"retrying in {delay}s..."
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.exception(
-                        f"❌ Graphiti ingestion failed for '{title}' after "
-                        f"{len(RETRY_DELAYS) + 1} attempts"
-                    )
-                    _update_ingestion_status(entry_id, "failed")
-
-    return asyncio.create_task(_ingest_background())
-
-
 @tool
 async def search_lore(query: str, world_name: str) -> str:
     """Search existing lore in a world's knowledge graph.
@@ -201,105 +129,66 @@ async def search_entities(query: str, world_name: str, entity_type: str) -> str:
 
 
 @tool
-async def save_lore_entry(title: str, content: str, world_name: str, category: str) -> str:
-    """Save a new lore entry to both Postgres and the Graphiti knowledge graph.
+async def save_lore_entry(title: str, content: str, world_name: str) -> str:
+    """Save a new lore entry directly to the Neo4j knowledge graph.
 
-    category should be one of: character, location, organization, nation,
-    race, concept, creature, item, event, general.
     Only call this after the user has approved the draft.
     """
     try:
-        world = World.get_or_create(world_name)
         chunks = _split_lore_content(content)
         if not chunks:
             return "❌ Failed to save lore entry: content is empty after normalization."
 
         should_suffix_titles = len(chunks) > 1
-        entries: list[LoreEntry] = []
+        created: list[dict[str, object]] = []
         for idx, chunk in enumerate(chunks, start=1):
             chunk_title = f"{title} (Part {idx})" if should_suffix_titles else title
-            entry = LoreEntry(
-                world_id=world.id,
-                title=chunk_title,
-                content=chunk,
-                category=category,
-            )
-            entries.append(entry)
-            session.add(entry)
+            entry = await create_entry(world_name, chunk_title, chunk)
+            created.append(entry)
 
-        session.commit()
         logger.info(
-            f"📜 Saved {len(entries)} LoreEntry row(s) for '{title}' "
-            f"in world '{world_name}'"
+            f"📜 Saved {len(created)} episode(s) for '{title}' in world '{world_name}'"
         )
 
-        for entry in entries:
-            spawn_ingestion_task(
-                entry_id=entry.id,
-                title=entry.title,
-                content=entry.content,
-                world_name=world_name,
-                group_id=world.graphiti_group_id,
-            )
-        logger.info(
-            f"📜 Postgres saved, spawned {len(entries)} Graphiti ingestion task(s) "
-            f"for base title '{title}'"
-        )
-
-        if len(entries) == 1:
-            entry = entries[0]
+        if len(created) == 1:
+            ep = created[0]
             return (
-                f"✅ Saved '{entry.title}' (id={entry.id}) to world '{world_name}'. "
-                "Knowledge graph ingestion is running in the background."
+                f"✅ Saved '{ep['title']}' (uuid={ep['uuid']}) to world '{world_name}'."
             )
 
-        entry_summaries = ", ".join([f"{entry.id}:{entry.title}" for entry in entries])
+        summaries = ", ".join([f"{e['uuid']}:{e['title']}" for e in created])
         return (
-            f"✅ Saved {len(entries)} lore entries for base title '{title}' in world "
-            f"'{world_name}': {entry_summaries}. Knowledge graph ingestion is running "
-            "in the background for each entry."
+            f"✅ Saved {len(created)} lore entries for '{title}' in world "
+            f"'{world_name}': {summaries}."
         )
     except Exception as e:
         logger.exception(f"❌ Failed to save lore entry '{title}'")
-        session.rollback()
         return f"❌ Failed to save lore entry: {e}"
 
 
 @tool
-async def delete_lore_entry(entry_id: int, world_name: str) -> str:
-    """Delete a lore entry from Postgres and clean up its Graphiti episodes.
+async def delete_lore_entry(episode_uuid: str, world_name: str) -> str:
+    """Delete a lore entry from the Neo4j knowledge graph by episode UUID.
 
-    Looks up the entry by its Postgres ID and verifies it belongs to the
-    named world before deleting.
+    Verifies the entry belongs to the named world before deleting.
     """
     try:
-        entry = session.query(LoreEntry).filter(LoreEntry.id == entry_id).first()
+        entry = await get_entry(episode_uuid)
         if entry is None:
-            return f"❌ No lore entry found with id={entry_id}."
+            return f"❌ No lore entry found with uuid={episode_uuid}."
 
-        if entry.world.name != world_name:
-            return f"❌ Entry {entry_id} belongs to world '{entry.world.name}', not '{world_name}'."
+        if entry["world_name"] != world_name:
+            return (
+                f"❌ Entry {episode_uuid} belongs to world '{entry['world_name']}', "
+                f"not '{world_name}'."
+            )
 
-        title = entry.title
-        group_id = entry.world.graphiti_group_id
+        deleted = await delete_entry(episode_uuid)
+        if not deleted:
+            return f"❌ Failed to delete entry {episode_uuid}."
 
-        episodes = await graphiti.retrieve_episodes(
-            reference_time=datetime.now(timezone.utc),
-            last_n=10_000,
-            group_ids=[group_id],
-        )
-        deleted_episodes = 0
-        for episode in episodes:
-            if episode.name == title:
-                await graphiti.remove_episode(episode.uuid)
-                deleted_episodes += 1
-
-        session.delete(entry)
-        session.commit()
-        logger.info(f"🗑️ Deleted LoreEntry '{title}' (id={entry_id}), removed {deleted_episodes} Graphiti episode(s)")
-
-        return f"✅ Deleted '{title}' (id={entry_id}) and removed {deleted_episodes} associated episode(s) from the knowledge graph."
+        logger.info(f"🗑️ Deleted lore entry '{entry['title']}' (uuid={episode_uuid})")
+        return f"✅ Deleted '{entry['title']}' (uuid={episode_uuid}) from world '{world_name}'."
     except Exception as e:
-        logger.exception(f"❌ Failed to delete lore entry {entry_id}")
-        session.rollback()
+        logger.exception(f"❌ Failed to delete lore entry {episode_uuid}")
         return f"❌ Failed to delete lore entry: {e}"

@@ -114,12 +114,10 @@ class Conversation(Base):
     location = Column(String, default='')
     story_background = Column(Text, default='')
     lore_world = Column(String, default=placeholder_lore)
-    world_id = Column(Integer, ForeignKey("worlds.id"), nullable=True, index=True)
 
     # --- relationships ---------------------------------------------------
 
     player = relationship("Player", lazy="selectin")
-    world = relationship("World", lazy="selectin")
     characters = relationship("Character", secondary=conversation_characters, lazy="selectin")
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan", lazy="selectin")
 

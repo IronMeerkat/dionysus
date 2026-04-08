@@ -49,21 +49,14 @@ export interface RenameConversationResponse {
 }
 
 export interface WorldResponse {
-  id: number;
   name: string;
-  description: string;
   entry_count: number;
 }
 
-export type IngestionStatus = "pending" | "ingested" | "failed";
-
 export interface LoreEntryListItem {
-  id: number;
+  uuid: string;
   title: string;
-  category: string | null;
-  ingestion_status: IngestionStatus;
   created_at: string;
-  updated_at: string;
 }
 
 // ---- Entity (Player / NPC) types ----
@@ -90,12 +83,9 @@ export interface EntityDetailResponse {
 }
 
 export interface LoreEntryResponse {
-  id: number;
+  uuid: string;
   title: string;
   content: string;
-  category: string | null;
-  ingestion_status: IngestionStatus;
-  world_id: number;
+  world_name: string;
   created_at: string;
-  updated_at: string;
 }

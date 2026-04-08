@@ -53,10 +53,6 @@ scene_change = ChatXAI(
     max_tokens=128, 
     max_retries=3,
 )
-mem0_reasoning = ChatXAI(
-    model="grok-4-1-fast-reasoning", 
-    temperature=0.1,
-)
 
 # lore_creator = ChatXAI(
 #     model="grok-4-1-fast-reasoning",
