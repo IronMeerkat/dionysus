@@ -9,8 +9,12 @@ from graphiti_core.nodes import EpisodeType
 
 from database.init_graphiti import graphiti
 from database.graphiti_types import ENTITY_TYPES, EDGE_TYPES, EDGE_TYPE_MAP
+from utils.llm_models import memory_filter
+from utils.prompts import memory_significance_prompt
 
 logger = getLogger(__name__)
+
+NOTHING_MARKER = "NOTHING"
 
 GROUP_SEP = "--"
 
@@ -22,6 +26,11 @@ def make_group_id(category: str, name: str) -> str:
     """
     sanitized = name.replace(" ", "_").replace(":", "_")
     return f"{category}{GROUP_SEP}{sanitized}"
+
+
+def make_memory_group_id(campaign_id: int, character_name: str) -> str:
+    """Build a campaign-scoped memory group_id for a character."""
+    return make_group_id("memories", f"campaign_{campaign_id}_{character_name}")
 
 
 async def load_information(
@@ -98,6 +107,74 @@ async def insert_information(
     )
 
 
+def _log_background_task_exception(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.exception("🔥 Background memory task failed", exc_info=exc)
+
+
+def fire_and_forget(coro: object) -> asyncio.Task[None]:
+    """Schedule a coroutine as a background task with automatic error logging."""
+    task = asyncio.create_task(coro)
+    task.add_done_callback(_log_background_task_exception)
+    return task
+
+
+async def process_and_save_memory(
+    messages: list[AnyMessage],
+    group_id: str,
+    source_description: str,
+    perspective: str | None,
+    character_name: str,
+    character_description: str,
+) -> None:
+    """Filter conversation for meaningful memories, then persist to Graphiti.
+
+    Calls the significance-filter LLM to decide whether anything worth
+    remembering happened.  If yes, the distilled summary is ingested as
+    a Graphiti episode.  If not, the save is skipped entirely.
+    """
+    lines = [f"{m.name}: {m.content}" for m in messages]
+    if not lines:
+        logger.warning("⚠️ No messages to evaluate for memory, skipping")
+        return
+
+    conversation_text = "\n".join(lines)
+
+    prompt = await memory_significance_prompt.ainvoke({
+        "name": character_name,
+        "description": character_description,
+        "conversation": conversation_text,
+    })
+
+    result = await memory_filter.ainvoke(prompt)
+    extracted: str = result.content.strip()
+
+    if not extracted or extracted.upper().startswith(NOTHING_MARKER):
+        logger.info(f"🧹 {character_name}: nothing meaningful to remember, skipping save")
+        return
+
+    logger.info(f"🧠 {character_name}: meaningful memory extracted, saving to graph")
+
+    name = f"memory_{character_name}_{datetime.now(timezone.utc).isoformat()}"
+
+    await graphiti.add_episode(
+        name=name,
+        episode_body=extracted,
+        source=EpisodeType.message,
+        source_description=source_description,
+        reference_time=datetime.now(timezone.utc),
+        group_id=group_id,
+        entity_types=ENTITY_TYPES,
+        edge_types=EDGE_TYPES,
+        edge_type_map=EDGE_TYPE_MAP,
+        custom_extraction_instructions=perspective,
+    )
+    logger.debug(f"💾 {character_name}: memory episode persisted")
+
+
 async def load_lorebook( lorebook: dict, world_name: str, *, batch_size: int = 5) -> int:
     """Load a SillyTavern-format lorebook dict into the Graphiti knowledge graph.
 
@@ -165,6 +242,27 @@ async def load_lorebook( lorebook: dict, world_name: str, *, batch_size: int = 5
 
     logger.info(f"✅ Lorebook loading complete: {ingested}/{len(entries)} entries ingested")
     return ingested
+
+
+async def wipe_campaign_memories(campaign_id: int) -> int:
+    """Remove all Graphiti nodes whose group_id belongs to this campaign.
+
+    Uses a single Cypher DETACH DELETE so we don't need to know individual
+    character names up-front.
+
+    Returns the number of nodes deleted.
+    """
+    prefix = f"memories{GROUP_SEP}campaign_{campaign_id}_"
+    logger.info(f"🗑️ Wiping all Graphiti nodes with group_id prefix '{prefix}'")
+
+    records, _, _ = await graphiti.driver.execute_query(
+        "MATCH (n) WHERE n.group_id STARTS WITH $prefix DETACH DELETE n RETURN count(n) AS deleted",
+        params={"prefix": prefix},
+    )
+
+    deleted: int = records[0]["deleted"] if records else 0
+    logger.info(f"🗑️ Deleted {deleted} Graphiti nodes for campaign {campaign_id}")
+    return deleted
 
 
 async def wipe_agent_memories(group_id: str) -> int:

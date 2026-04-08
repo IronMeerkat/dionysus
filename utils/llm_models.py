@@ -66,3 +66,9 @@ lore_creator = ChatNanoGPT(
     presence_penalty=0.2,
     max_retries=4,
 )
+
+memory_filter = ChatXAI(
+    model="grok-4-1-fast-non-reasoning",
+    temperature=0.1,
+    max_retries=3,
+)

@@ -4,7 +4,7 @@ import { useOptionsStore, useSessionStore } from "../contexts/SessionStore";
 import { useConversationStore } from "../contexts/ConversationStore";
 import { useMessageStore } from "../contexts/MessageStore";
 import { restService } from "../services/restService";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import PlayerSelect from "../components/PlayerSelect";
 import CharacterSelect from "../components/CharacterSelect";
 import ChatSidebar from "../components/ChatSidebar";
@@ -16,6 +16,12 @@ interface SessionSetupProps {
 
 const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const campaignId = searchParams.get("campaign_id");
+
+  useEffect(() => {
+    if (!campaignId) navigate("/campaigns", { replace: true });
+  }, [campaignId, navigate]);
 
   const { players, characters, setPlayers, setCharacters } = useOptionsStore();
   const { setPlayer, setCharacters: setSessionCharacters } = useSessionStore();
@@ -79,10 +85,10 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
     !submitting;
 
   const handleStart = useCallback(async () => {
-    if (!canSubmit || selectedPlayerId === null) return;
+    if (!canSubmit || selectedPlayerId === null || !campaignId) return;
     setSubmitting(true);
     setError(null);
-    await restService.setupSession(selectedPlayerId, Array.from(selectedCharacterIds)).then(response => {
+    await restService.setupSession(selectedPlayerId, Array.from(selectedCharacterIds), Number(campaignId)).then(response => {
       setPlayer(players.find((p) => p.id === selectedPlayerId)!);
       setSessionCharacters(characters.filter((c) => selectedCharacterIds.has(c.id)));
       setActiveConversation(response.id, response.title);
@@ -99,7 +105,7 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
     }).finally(() => {
       setSubmitting(false);
     });
-  }, [canSubmit, selectedPlayerId, selectedCharacterIds]);
+  }, [canSubmit, selectedPlayerId, selectedCharacterIds, campaignId]);
 
   if (loading) {
     return (

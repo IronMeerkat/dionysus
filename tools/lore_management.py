@@ -1,7 +1,8 @@
-import re
+import asyncio
 from logging import getLogger
 
 from langchain.tools import tool
+from pydantic import BaseModel, Field
 
 from database.graphiti_utils import load_information, make_group_id
 from database.graphiti_types import ENTITY_TYPES
@@ -9,82 +10,10 @@ from database.neo4j_lore import create_entry, delete_entry, get_entry
 
 logger = getLogger(__name__)
 
-TARGET_ENTRY_MIN_WORDS = 40
-TARGET_ENTRY_MAX_WORDS = 70
 
-
-def _word_count(text: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", text))
-
-
-def _split_paragraph_into_sentence_chunks(paragraph: str) -> list[str]:
-    """Split a long paragraph into sentence-aware chunks near target size."""
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", paragraph.strip()) if s.strip()]
-    if not sentences:
-        return []
-
-    chunks: list[str] = []
-    current: list[str] = []
-    current_words = 0
-
-    for sentence in sentences:
-        sentence_words = _word_count(sentence)
-        would_exceed = current and (current_words + sentence_words > TARGET_ENTRY_MAX_WORDS)
-        if would_exceed:
-            chunks.append(" ".join(current).strip())
-            current = [sentence]
-            current_words = sentence_words
-            continue
-
-        current.append(sentence)
-        current_words += sentence_words
-
-    if current:
-        chunks.append(" ".join(current).strip())
-    return chunks
-
-
-def _split_lore_content(content: str) -> list[str]:
-    """Create coherent lore chunks using paragraph-first, sentence-second splitting."""
-    normalized_content = content.strip()
-    if not normalized_content:
-        return []
-
-    if _word_count(normalized_content) <= TARGET_ENTRY_MAX_WORDS:
-        return [normalized_content]
-
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", normalized_content) if p.strip()]
-    if not paragraphs:
-        return [normalized_content]
-
-    chunks: list[str] = []
-    current_parts: list[str] = []
-    current_words = 0
-
-    def flush_current() -> None:
-        nonlocal current_parts, current_words
-        if current_parts:
-            chunks.append("\n\n".join(current_parts).strip())
-            current_parts = []
-            current_words = 0
-
-    for paragraph in paragraphs:
-        paragraph_words = _word_count(paragraph)
-        if paragraph_words > TARGET_ENTRY_MAX_WORDS:
-            flush_current()
-            sentence_chunks = _split_paragraph_into_sentence_chunks(paragraph)
-            chunks.extend([chunk for chunk in sentence_chunks if chunk])
-            continue
-
-        would_exceed = current_parts and (current_words + paragraph_words > TARGET_ENTRY_MAX_WORDS)
-        if would_exceed and current_words >= TARGET_ENTRY_MIN_WORDS:
-            flush_current()
-
-        current_parts.append(paragraph)
-        current_words += paragraph_words
-
-    flush_current()
-    return [chunk for chunk in chunks if chunk]
+class LoreEntryInput(BaseModel):
+    title: str = Field(description="Specific, standalone title for this entry")
+    content: str = Field(description="The lore content, roughly 40-70 words")
 
 
 @tool
@@ -130,40 +59,67 @@ async def search_entities(query: str, world_name: str, entity_type: str) -> str:
 
 @tool
 async def save_lore_entry(title: str, content: str, world_name: str) -> str:
-    """Save a new lore entry directly to the Neo4j knowledge graph.
+    """Save a single lore entry to the Neo4j knowledge graph.
 
-    Only call this after the user has approved the draft.
+    Call this once per atomic entry. When saving multiple entries from a
+    larger article, call this tool separately for each one with its own
+    title and content.
     """
     try:
-        chunks = _split_lore_content(content)
-        if not chunks:
-            return "❌ Failed to save lore entry: content is empty after normalization."
+        content = content.strip()
+        if not content:
+            return "❌ Failed to save lore entry: content is empty."
 
-        should_suffix_titles = len(chunks) > 1
-        created: list[dict[str, object]] = []
-        for idx, chunk in enumerate(chunks, start=1):
-            chunk_title = f"{title} (Part {idx})" if should_suffix_titles else title
-            entry = await create_entry(world_name, chunk_title, chunk)
-            created.append(entry)
-
-        logger.info(
-            f"📜 Saved {len(created)} episode(s) for '{title}' in world '{world_name}'"
-        )
-
-        if len(created) == 1:
-            ep = created[0]
-            return (
-                f"✅ Saved '{ep['title']}' (uuid={ep['uuid']}) to world '{world_name}'."
-            )
-
-        summaries = ", ".join([f"{e['uuid']}:{e['title']}" for e in created])
-        return (
-            f"✅ Saved {len(created)} lore entries for '{title}' in world "
-            f"'{world_name}': {summaries}."
-        )
+        entry = await create_entry(world_name, title, content)
+        logger.info(f"📜 Saved '{title}' (uuid={entry['uuid']}) to world '{world_name}'")
+        return f"✅ Saved '{entry['title']}' (uuid={entry['uuid']}) to world '{world_name}'."
     except Exception as e:
         logger.exception(f"❌ Failed to save lore entry '{title}'")
         return f"❌ Failed to save lore entry: {e}"
+
+
+@tool
+async def bulk_save_lore_entries(entries: list[LoreEntryInput], world_name: str) -> str:
+    """Save many small lore entries to the knowledge graph in one call.
+
+    Use this after the user approves a Wikipedia-style article and you have
+    decomposed it into atomic entries. Each entry should have a specific
+    standalone title and roughly 40-70 words of content.
+
+    Saves run in the background so the conversation stays responsive.
+    """
+    valid = [e for e in entries if e.content.strip()]
+    if not valid:
+        return "❌ No entries to save: all content was empty."
+
+    async def _save_all() -> None:
+        succeeded = 0
+        failed = 0
+        for entry in valid:
+            try:
+                result = await create_entry(world_name, entry.title, entry.content.strip())
+                logger.info(
+                    f"📜 Bulk-saved '{entry.title}' (uuid={result['uuid']}) "
+                    f"to world '{world_name}'"
+                )
+                succeeded += 1
+            except Exception:
+                logger.exception(f"❌ Bulk-save failed for '{entry.title}'")
+                failed += 1
+
+        logger.info(
+            f"📦 Bulk save complete for world '{world_name}': "
+            f"{succeeded} succeeded, {failed} failed out of {len(valid)}"
+        )
+
+    asyncio.create_task(_save_all())
+
+    titles = ", ".join(f"'{e.title}'" for e in valid)
+    return (
+        f"📦 Queued {len(valid)} lore entries for background save to world "
+        f"'{world_name}': {titles}. They will be ingested into the knowledge "
+        "graph shortly."
+    )
 
 
 @tool

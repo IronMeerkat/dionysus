@@ -1,0 +1,62 @@
+@reference "../index.css";
+
+.campaigns-page {
+  @apply flex flex-1 flex-col overflow-y-auto px-6 py-8;
+}
+
+.campaigns-header {
+  @apply mb-8 flex items-center justify-between;
+}
+
+.campaigns-title {
+  @apply text-2xl font-bold text-base-content;
+}
+
+.campaigns-grid {
+  @apply grid gap-4;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.campaign-card {
+  @apply cursor-pointer rounded-xl border border-base-content/10 bg-base-200 p-5 shadow-sm transition-colors;
+}
+
+.campaign-card:hover {
+  @apply border-primary/40 bg-base-300;
+}
+
+.campaign-card-top {
+  @apply mb-1 flex items-start justify-between gap-2;
+}
+
+.campaign-card-name {
+  @apply text-lg font-semibold text-base-content;
+}
+
+.campaign-card-delete-btn {
+  @apply flex-shrink-0 rounded px-1.5 text-lg leading-none text-base-content/30 transition-colors;
+}
+
+.campaign-card-delete-btn:hover {
+  @apply bg-error/15 text-error;
+}
+
+.campaign-card-lore {
+  @apply mb-3 text-sm text-base-content/60;
+}
+
+.campaign-card-meta {
+  @apply text-xs text-base-content/40;
+}
+
+.campaigns-empty {
+  @apply py-20 text-center text-base-content/40;
+}
+
+.campaigns-loading {
+  @apply py-20 text-center text-base-content/40;
+}
+
+.campaigns-error {
+  @apply mb-4 rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
+}

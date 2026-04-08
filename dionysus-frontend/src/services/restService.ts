@@ -11,6 +11,8 @@ import type {
   LoreEntryResponse,
   EntityListItem,
   EntityDetailResponse,
+  CampaignListItem,
+  CampaignDetailResponse,
 } from "../types/rest";
 
 const API_BASE =
@@ -66,10 +68,10 @@ export const restService = {
     return request<Options>("/session/options");
   },
 
-  setupSession(playerId: number, characterIds: number[]): Promise<FromConversationResponse> {
+  setupSession(playerId: number, characterIds: number[], campaignId: number): Promise<FromConversationResponse> {
     return request<FromConversationResponse>("/session/setup", {
       method: "POST",
-      body: { player_id: playerId, character_ids: characterIds },
+      body: { player_id: playerId, character_ids: characterIds, campaign_id: campaignId },
     });
   },
 
@@ -244,6 +246,35 @@ export const restService = {
 
   deleteNpc(npcId: number): Promise<MessageResponse> {
     return request<MessageResponse>(`/npcs/${npcId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ---- Campaigns ----
+
+  getCampaigns(): Promise<CampaignListItem[]> {
+    return request<CampaignListItem[]>("/campaigns");
+  },
+
+  getCampaign(campaignId: number): Promise<CampaignDetailResponse> {
+    return request<CampaignDetailResponse>(`/campaigns/${campaignId}`);
+  },
+
+  createCampaign(name: string, loreWorld: string): Promise<CampaignDetailResponse> {
+    return request<CampaignDetailResponse>("/campaigns", {
+      method: "POST",
+      body: { name, lore_world: loreWorld },
+    });
+  },
+
+  deleteCampaign(campaignId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/campaigns/${campaignId}`, {
+      method: "DELETE",
+    });
+  },
+
+  deleteConversation(conversationId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/conversations/${conversationId}`, {
       method: "DELETE",
     });
   },

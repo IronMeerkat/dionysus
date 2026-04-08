@@ -4,9 +4,11 @@ from database.models.character import (
     Player,
     PlayerDescription,
 )
+from database.models.campaign import Campaign
 from database.models.conversation import Conversation, Message, conversation_characters
 
 __all__ = [
+    "Campaign",
     "Character",
     "CharacterDescription",
     "Conversation",

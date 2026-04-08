@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from database.graphiti_utils import load_information, make_group_id
 from tools.lore_management import (
+    bulk_save_lore_entries,
     delete_lore_entry,
     save_lore_entry,
     search_entities,
@@ -19,7 +20,7 @@ from utils.prompts import lore_creator_prompt_template
 
 logger = getLogger(__name__)
 
-LORE_TOOLS = [search_lore, search_entities, save_lore_entry, delete_lore_entry]
+LORE_TOOLS = [search_lore, search_entities, save_lore_entry, bulk_save_lore_entries, delete_lore_entry]
 
 
 class LoreCreatorState(BaseModel):

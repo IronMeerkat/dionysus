@@ -8,16 +8,11 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import reconstructor, relationship
 
-from hephaestus.settings import settings
-
 from database.postgres_connection import Base, session
 from database.models import Player, Character
 
 
-
 logger = getLogger(__name__)
-
-placeholder_lore = settings.PLACEHOLDER_LORE_WORLD
 
 # ------------------------------------------------------------------
 # Association table: which characters participate in a conversation
@@ -111,12 +106,13 @@ class Conversation(Base):
     created_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=False, index=True)
     location = Column(String, default='')
     story_background = Column(Text, default='')
-    lore_world = Column(String, default=placeholder_lore)
 
     # --- relationships ---------------------------------------------------
 
+    campaign = relationship("Campaign", back_populates="conversations", lazy="selectin")
     player = relationship("Player", lazy="selectin")
     characters = relationship("Character", secondary=conversation_characters, lazy="selectin")
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan", lazy="selectin")
@@ -193,9 +189,9 @@ class Conversation(Base):
 
 
     @classmethod
-    def create(cls, player: Player, characters: list[Character], location: str ='', story_background: str ='', lore_world: str ='') -> "Conversation":
+    def create(cls, player: Player, characters: list[Character], campaign_id: int, location: str = '', story_background: str = '') -> "Conversation":
         """🎭 Create a new conversation between a player and one or more characters."""
-        conversation = cls(player=player, location=location, story_background=story_background, lore_world=lore_world)
+        conversation = cls(player=player, location=location, story_background=story_background, campaign_id=campaign_id)
 
         for character in characters:
             conversation.add_character(character)

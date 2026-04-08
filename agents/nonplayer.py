@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from hephaestus.helpers import Oligaton
 
-from database.graphiti_utils import load_information, make_group_id, insert_information
+from database.graphiti_utils import load_information, make_group_id, make_memory_group_id, fire_and_forget, process_and_save_memory
 from database.models import Character as CharacterModel
 from database.models.conversation import Conversation
 from utils.llm_models import npc_emotions, npc_should_respond, npc_thoughts, npc_narration
@@ -98,7 +98,7 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
     #     last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
     #     lore = await load_information(
     #         query=last_human_message.content,
-    #         group_ids=[make_group_id("lore", conversation.lore_world)],
+    #         group_ids=[make_group_id("lore", conversation.campaign.lore_world)],
     #     )
 
     #     return {'lore': lore, 'messages': []}
@@ -108,8 +108,8 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
         memories = await load_information(
             query=last_human_message.content,
             group_ids=[
-                make_group_id("memories", character.name),
-                make_group_id("lore", conversation.lore_world),
+                make_memory_group_id(conversation.campaign.id, character.name),
+                make_group_id("lore", conversation.campaign.lore_world),
             ],
             limit=20,
         )
@@ -155,15 +155,14 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
         #     response.content = f"**{character.name}**: {response.content}"
         response.name = character.name
         response.id = str(uuid4())
-        try:
-            await insert_information(
-                messages=state.combined_messages,
-                group_id=make_group_id("memories", character.name),
-                source_description=f"session:{conversation.lore_world}",
-                perspective=character_episodic_memory.compile(name=character.name, description=character.description),
-            )
-        except Exception as e:
-            logger.exception(f"❌ Error inserting information:")
+        fire_and_forget(process_and_save_memory(
+            messages=state.combined_messages,
+            group_id=make_memory_group_id(conversation.campaign.id, character.name),
+            source_description=f"session:{conversation.campaign.lore_world}",
+            perspective=character_episodic_memory.compile(name=character.name, description=character.description),
+            character_name=character.name,
+            character_description=character.description,
+        ))
         return {'messages': [response]}
 
     graph = StateGraph(NPCState)

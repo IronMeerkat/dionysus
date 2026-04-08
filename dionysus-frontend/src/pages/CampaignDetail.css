@@ -1,0 +1,74 @@
+@reference "../index.css";
+
+.campaign-detail {
+  @apply flex flex-1 flex-col overflow-y-auto px-6 py-8;
+}
+
+.campaign-detail-header {
+  @apply mb-8 flex items-start justify-between gap-4;
+}
+
+.campaign-detail-name {
+  @apply mb-2 text-2xl font-bold text-base-content;
+}
+
+.campaign-detail-lore {
+  @apply inline-block rounded-full border border-base-content/15 bg-base-300 px-3 py-1 text-sm text-base-content/70;
+}
+
+.campaign-detail-section-header {
+  @apply mb-4 flex items-center justify-between;
+}
+
+.campaign-detail-section-title {
+  @apply text-lg font-semibold text-base-content;
+}
+
+.campaign-detail-grid {
+  @apply grid gap-4;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.campaign-conv-card {
+  @apply cursor-pointer rounded-xl border border-base-content/10 bg-base-200 p-4 shadow-sm transition-colors;
+}
+
+.campaign-conv-card:hover {
+  @apply border-primary/40 bg-base-300;
+}
+
+.campaign-conv-card-top {
+  @apply mb-1 flex items-start justify-between gap-2;
+}
+
+.campaign-conv-title {
+  @apply text-sm font-medium text-base-content;
+}
+
+.campaign-conv-delete-btn {
+  @apply flex-shrink-0 rounded px-1.5 text-base leading-none text-base-content/30 transition-colors;
+}
+
+.campaign-conv-delete-btn:hover {
+  @apply bg-error/15 text-error;
+}
+
+.campaign-conv-date {
+  @apply text-xs text-base-content/40;
+}
+
+.campaign-delete-btn {
+  @apply flex-shrink-0;
+}
+
+.campaign-detail-empty {
+  @apply py-12 text-center text-base-content/40;
+}
+
+.campaign-detail-loading {
+  @apply py-20 text-center text-base-content/40;
+}
+
+.campaign-detail-error {
+  @apply mb-4 rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
+}

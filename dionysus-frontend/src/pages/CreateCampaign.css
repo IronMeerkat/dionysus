@@ -1,0 +1,49 @@
+@reference "../index.css";
+
+.create-campaign {
+  @apply flex flex-1 items-center justify-center overflow-y-auto px-4 py-4;
+}
+
+.create-campaign-card {
+  @apply w-full max-w-lg rounded-xl border border-base-content/10 bg-base-200 p-8 shadow-lg;
+}
+
+.create-campaign-title {
+  @apply mb-6 text-center text-2xl font-bold text-base-content;
+}
+
+.create-campaign-field {
+  @apply mb-6;
+}
+
+.create-campaign-label {
+  @apply mb-2 block text-sm font-semibold text-base-content/70;
+}
+
+.create-campaign-input {
+  @apply w-full rounded-lg border border-base-content/10 bg-base-100 px-4 py-2 text-base-content outline-none transition-colors;
+}
+
+.create-campaign-input:focus {
+  @apply border-primary;
+}
+
+.create-campaign-select {
+  @apply w-full rounded-lg border border-base-content/10 bg-base-100 px-4 py-2 text-base-content outline-none transition-colors;
+}
+
+.create-campaign-select:focus {
+  @apply border-primary;
+}
+
+.create-campaign-footer {
+  @apply mt-8 flex justify-end;
+}
+
+.create-campaign-error {
+  @apply mb-4 rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
+}
+
+.create-campaign-loading {
+  @apply py-20 text-center text-base-content/40;
+}

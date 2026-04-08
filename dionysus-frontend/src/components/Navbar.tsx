@@ -28,6 +28,7 @@ const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
     { label: "Location", onClick: () => setLocationModalOpen(true), onKeyDown: () => setLocationModalOpen(true) },
     { label: "Session Setup", onClick: () => navigate("/session-setup"), onKeyDown: () => navigate("/session-setup") },
     { label: "Lore", onClick: () => navigate("/lore"), onKeyDown: () => navigate("/lore") },
+    { label: "Campaigns", onClick: () => navigate("/campaigns"), onKeyDown: () => navigate("/campaigns") },
     { label: "Players", onClick: () => navigate("/players"), onKeyDown: () => navigate("/players") },
     { label: "NPCs", onClick: () => navigate("/npcs"), onKeyDown: () => navigate("/npcs") },
   ];

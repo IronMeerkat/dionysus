@@ -89,3 +89,27 @@ export interface LoreEntryResponse {
   world_name: string;
   created_at: string;
 }
+
+// ---- Campaign types ----
+
+export interface CampaignListItem {
+  id: number;
+  name: string;
+  lore_world: string;
+  conversation_count: number;
+  created_at: string;
+}
+
+export interface CampaignConversation {
+  id: number;
+  title: string;
+  created_at: string;
+}
+
+export interface CampaignDetailResponse {
+  id: number;
+  name: string;
+  lore_world: string;
+  created_at: string;
+  conversations: CampaignConversation[];
+}

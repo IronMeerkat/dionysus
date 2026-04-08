@@ -99,7 +99,7 @@ class Character(Base):
         )
         return desc
 
-    def get_description_at_version(self, version: int) -> str | None:
+    def get_description_at_versioen(self, version: int) -> str | None:
         """🔍 Retrieve the description body for a specific version.
 
         Args:

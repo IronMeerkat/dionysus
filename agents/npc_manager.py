@@ -7,7 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
 
-from database.graphiti_utils import load_information, make_group_id
+from database.graphiti_utils import load_information, make_group_id, make_memory_group_id
 from database.models.conversation import Conversation
 from tools.npc_management import create_character
 from utils.prompts import npc_creator_prompt_template
@@ -31,11 +31,11 @@ def spawn_npc_manager(conversation: Conversation) -> StateGraph:
 
         lore = await load_information(
             query=last_human_message.content,
-            group_ids=[make_group_id("lore", conversation.lore_world)],
+            group_ids=[make_group_id("lore", conversation.campaign.lore_world)],
             limit=20,
         )
 
-        character_group_ids = [make_group_id("memories", c.name) for c in conversation.characters]
+        character_group_ids = [make_memory_group_id(conversation.campaign.id, c.name) for c in conversation.characters]
         episodic_memories = await load_information(
             query=last_human_message.content,
             group_ids=character_group_ids,

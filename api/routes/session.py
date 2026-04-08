@@ -3,9 +3,8 @@ import logging
 from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
 
-from database.models import Character, Player, Conversation
+from database.models import Campaign, Character, Player, Conversation
 from database.postgres_connection import session
-from hephaestus.settings import settings
 from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = logging.getLogger(__name__)
@@ -39,12 +38,16 @@ def _conversation_response(conversation: Conversation) -> dict[str, object]:
 def setup_session(
     player_id: int = Body(...),
     character_ids: list[int] = Body(...),
+    campaign_id: int = Body(...),
 ) -> dict[str, object]:
     """Create a new Conversation in the DB and return it.
 
     The client should then pass the returned ``id`` to the SocketIO
     ``init_session`` event to start the in-RAM session.
     """
+    campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     player = session.query(Player).filter(Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
@@ -55,9 +58,9 @@ def setup_session(
     conversation = Conversation.create(
         player=player,
         characters=characters,
+        campaign_id=campaign_id,
         location=placeholder_location,
         story_background=placeholder_scenario,
-        lore_world=settings.PLACEHOLDER_LORE_WORLD,
     )
     logger.info(f"🎮 Created conversation {conversation.id} for player={player.name}")
     return _conversation_response(conversation)
