@@ -81,10 +81,26 @@ def register_events(sio: socketio.AsyncServer) -> None:
         conversation: Conversation | None = sock_session.get("conversation")
         graph = sock_session.get("graph")
 
-        if conversation is None or graph is None:
-            logger.error(f"❌ No active session for sid={sid}")
-            await sio.emit("error", {"message": "No active session. Call init_session first."}, to=sid)
+        if conversation is None:
+            conversation = db_session.query(Conversation).filter(Conversation.id == data.get("conversation_id")).first()
+            if conversation is None:
+                logger.error(f"❌ No conversation found for sid={sid}")
+                await sio.emit("error", {"message": "No conversation found."}, to=sid)
+                return
+            await sio.save_session(sid, {
+                "conversation": conversation,
+            })
+        if conversation.id != data.get("conversation_id"):
+            logger.error(f"❌ Conversation ID mismatch for sid={sid}")
+            await sio.emit("error", {"message": "Conversation ID mismatch."}, to=sid)
             return
+        if graph is None:
+            logger.warning(f"🔄 No graph found for sid={sid}, spawning new graph")
+            graph = spawn_dungeon_master(conversation)
+            await sio.save_session(sid, {
+                "conversation": conversation,
+                "graph": graph,
+            })
 
         msg_id = str(uuid4())
         await sio.emit("message_created", {"messageId": msg_id}, to=sid)

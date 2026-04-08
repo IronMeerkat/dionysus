@@ -93,28 +93,29 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
     };
   }, [socket, confirmUserMessage, startStream, appendToken, finalizeStream]);
 
+  const connectionId = useSocketStore((s) => s.connectionId);
+
   useEffect(() => {
-    if (activeConversationId === null) return;
+    if (activeConversationId === null || connectionId === 0) return;
     socket.initSession(activeConversationId);
-  }, [socket, activeConversationId]);
+  }, [socket, activeConversationId, connectionId]);
 
   const handleSend = useCallback(
     (text: string) => {
-      addUserMessage(text, player?.name ?? "You");
-      socket.sendMessage(text);
+      if (!player || activeConversationId === null) {
+        console.error("🔥 Cannot send message: player or activeConversationId is null");
+        return;
+      }
+      addUserMessage(text, player.name);
+      socket.sendMessage({ conversation_id: activeConversationId, content: text });
     },
-    [socket, player, addUserMessage],
-  );
-
-
-  if (!player || characters.length === 0) {
-    return <Navigate to="/session-setup" replace />;
-  }
+    [socket, player, addUserMessage, activeConversationId],
+  ); 
 
   return (
     <div className="page-layout">
       <ChatSidebar
-        playerName={player.name}
+        playerName={!!player ? player.name : ''}
         characterNames={characters.map((c) => c.name)}
         mobileOpen={sidebarOpen}
         onClose={closeSidebar}

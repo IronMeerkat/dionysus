@@ -2,15 +2,21 @@ import { io, Socket } from "socket.io-client";
 import type {
   ServerToClientEvents,
   ClientToServerEvents,
+  SendMessagePayload,
 } from "../types/socket";
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 export class SocketService {
   private socket: TypedSocket | null = null;
+  private _onConnect: (() => void) | null = null;
 
   get connected(): boolean {
     return this.socket?.connected ?? false;
+  }
+
+  set onConnect(cb: (() => void) | null) {
+    this._onConnect = cb;
   }
 
   connect(url: string): void {
@@ -31,6 +37,7 @@ export class SocketService {
 
     this.socket.on("connect", () => {
       console.log("🔌 SocketService: connected", this.socket?.id);
+      this._onConnect?.();
     });
 
     this.socket.on("disconnect", (reason) => {
@@ -49,12 +56,12 @@ export class SocketService {
     }
   }
 
-  sendMessage(content: string): void {
+  sendMessage(payload: SendMessagePayload): void {
     if (!this.socket?.connected) {
       console.error("❌ SocketService: cannot send — not connected");
       return;
     }
-    this.socket.emit("send_message", { content });
+    this.socket.emit("send_message", payload);
   }
 
   initSession(conversationId: number): void {

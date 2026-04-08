@@ -5,7 +5,6 @@ import operator
 from uuid import uuid4
 from pydantic import BaseModel, Field
 from langchain_core.messages import AnyMessage, HumanMessage
-from langchain_xai import ChatXAI
 from langgraph.graph import END, START, StateGraph
 from logging import getLogger
 
@@ -13,6 +12,7 @@ from hephaestus.agent_architectures import create_daisy_chain, wrap_agent_return
 
 from database.graphiti_utils import insert_information, make_group_id
 from database.models.conversation import Conversation
+from utils.llm_models import scene_change
 from utils.prompts import scene_change_prompt_template
 from agents.nonplayer import spawn_npc
 
@@ -23,8 +23,7 @@ class SceneChanged(BaseModel):
     scene_changed: bool = Field(default=False, description="true if there was a time skip, false otherwise")
 
 
-scene_change_model = ChatXAI(model="grok-4-1-fast", temperature=0, max_tokens=128, max_retries=3
-                            ).with_structured_output(SceneChanged, strict=True)
+scene_change_model = scene_change.with_structured_output(SceneChanged, strict=True)
 
 class DungeonMasterState(BaseModel):
     messages: Annotated[list[AnyMessage], operator.add]

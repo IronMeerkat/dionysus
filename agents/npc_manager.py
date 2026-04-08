@@ -3,7 +3,6 @@ from typing import Annotated, Literal
 import operator
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
-from langchain_xai import ChatXAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
@@ -12,6 +11,7 @@ from database.graphiti_utils import load_information, make_group_id
 from database.models.conversation import Conversation
 from tools.npc_management import create_character
 from utils.prompts import npc_creator_prompt_template
+from utils.llm_models import npc_manager
 
 logger = getLogger(__name__)
 
@@ -57,11 +57,7 @@ def spawn_npc_manager(conversation: Conversation) -> StateGraph:
             "other_characters": '\n\n\n'.join([f"**{c.name}**:\n{c.description}" for c in conversation.characters]),
         })
 
-        model = ChatXAI(
-            model="grok-4-1-fast-reasoning",
-            temperature=0.8,
-            max_retries=3,
-        ).bind_tools(NPC_TOOLS)
+        model = npc_manager.bind_tools(NPC_TOOLS)
 
         response = await model.ainvoke(prompt)
         logger.info(f"🎭 Agent response, tool_calls={bool(response.tool_calls)}")

@@ -1,0 +1,85 @@
+@reference "../index.css";
+
+.lore-page {
+  @apply flex flex-1 justify-center overflow-y-auto px-4 py-6;
+}
+
+.lore-container {
+  @apply flex w-full max-w-2xl flex-col gap-6;
+}
+
+.lore-section {
+  @apply rounded-xl border border-base-content/10 bg-base-200 p-6 shadow-lg;
+}
+
+.lore-section-header {
+  @apply mb-4 flex items-center justify-between;
+}
+
+.lore-section-title {
+  @apply text-lg font-bold text-base-content;
+}
+
+.lore-section-actions {
+  @apply flex gap-2;
+}
+
+.lore-world-form {
+  @apply mb-4 flex flex-col gap-2;
+}
+
+.lore-entries-list {
+  @apply flex flex-col gap-1;
+}
+
+.lore-entry-row {
+  @apply flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-base-content/10 bg-base-100 px-4 py-3 text-left transition-colors;
+}
+
+.lore-entry-row:hover {
+  @apply border-primary/40 bg-base-300;
+}
+
+.lore-entry-row.selected {
+  @apply border-primary bg-primary/10;
+}
+
+.lore-entry-title {
+  @apply text-sm font-medium text-base-content;
+}
+
+.lore-entry-badges {
+  @apply flex items-center gap-2;
+}
+
+.lore-entry-badge {
+  @apply rounded-full bg-base-content/10 px-2 py-0.5 text-xs text-base-content/60;
+}
+
+.lore-editor-form {
+  @apply flex flex-col gap-4;
+}
+
+.lore-label {
+  @apply flex flex-col gap-1 text-sm font-semibold text-base-content/70;
+}
+
+.lore-textarea {
+  @apply min-h-[12rem] resize-y font-mono text-sm leading-relaxed;
+}
+
+.lore-editor-actions {
+  @apply flex gap-2;
+}
+
+.lore-error {
+  @apply rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
+}
+
+.lore-empty {
+  @apply py-4 text-center text-sm text-base-content/40;
+}
+
+.lore-loading {
+  @apply py-20 text-center text-base-content/40;
+}

@@ -6,12 +6,18 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemM
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import reconstructor, relationship
+
+from hephaestus.settings import settings
 
 from database.postgres_connection import Base, session
 from database.models import Player, Character
 
+
+
 logger = getLogger(__name__)
+
+placeholder_lore = settings.PLACEHOLDER_LORE_WORLD
 
 # ------------------------------------------------------------------
 # Association table: which characters participate in a conversation
@@ -105,18 +111,29 @@ class Conversation(Base):
     created_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
-    location = Column(String, nullable=True)
-    story_background = Column(Text, nullable=True)
-    lore_world = Column(String, nullable=True)
+    location = Column(String, default='')
+    story_background = Column(Text, default='')
+    lore_world = Column(String, default=placeholder_lore)
+    world_id = Column(Integer, ForeignKey("worlds.id"), nullable=True, index=True)
 
     # --- relationships ---------------------------------------------------
 
     player = relationship("Player", lazy="selectin")
+    world = relationship("World", lazy="selectin")
     characters = relationship("Character", secondary=conversation_characters, lazy="selectin")
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan", lazy="selectin")
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
+        self._init_transient()
+
+    @reconstructor
+    def _init_transient(self) -> None:
+        """Initialise non-persistent attributes.
+
+        Called both from ``__init__`` (new instances) and by SQLAlchemy's
+        ``@reconstructor`` hook (instances loaded from the DB).
+        """
         self.message_buffer: list[AnyMessage] = []
 
     # ------------------------------------------------------------------

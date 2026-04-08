@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "graphiti-core",
     "hephaestus",
+    "langchain-openai",
     "langgraph",
     "langgraph-checkpoint-postgres>=3.0.4",
     "mem0ai>=1.0.2",

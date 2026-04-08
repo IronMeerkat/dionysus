@@ -21,6 +21,7 @@ export interface SocketErrorPayload {
 }
 
 export interface SendMessagePayload {
+  conversation_id: number;
   content: string;
 }
 
@@ -54,3 +55,26 @@ export interface ClientToServerEvents {
 }
 
 export type onOffType = <T extends keyof ServerToClientEvents>(event: T, handler: ServerToClientEvents[T]) => void;
+
+// ---- Lore Creator namespace (/lore) ----
+
+export interface LoreTokenPayload {
+  token: string;
+}
+
+export interface LoreSavingPayload {
+  title: string;
+}
+
+export interface LoreServerToClientEvents {
+  lore_session_ready: (payload: { world_name: string }) => void;
+  lore_token: (payload: LoreTokenPayload) => void;
+  lore_saving: (payload: LoreSavingPayload) => void;
+  lore_done: () => void;
+  error: (payload: SocketErrorPayload) => void;
+}
+
+export interface LoreClientToServerEvents {
+  init_lore_session: (payload: { world_name: string }) => void;
+  lore_message: (payload: { content: string }) => void;
+}

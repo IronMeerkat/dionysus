@@ -8,20 +8,15 @@ from typing import Dict, List, Optional
 from mem0 import AsyncMemory
 from mem0.configs.base import MemoryConfig, RerankerConfig, VectorStoreConfig, EmbedderConfig, LlmConfig
 from langchain_ollama import OllamaEmbeddings
-from langchain_xai import ChatXAI
 from langchain_chroma import Chroma
 from pathlib import Path
+
+from utils.llm_models import mem0_reasoning
 
 logger = getLogger(__name__)
 
 persistent_path = Path(__file__).parent / "persistent_mem0"
 persistent_path.mkdir(parents=True, exist_ok=True)
-
-model = ChatXAI(
-    model="grok-4-1-fast-reasoning",
-    temperature=0.1,
-    # max_tokens=1024,
-)
 
 embeddings = OllamaEmbeddings(model="mxbai-embed-large")
 
@@ -37,7 +32,7 @@ config = MemoryConfig(
     llm=LlmConfig(
         provider="langchain",
         config={
-            "model": model,
+            "model": mem0_reasoning,
         }
     ),
     vector_store=VectorStoreConfig(

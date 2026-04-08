@@ -4,7 +4,6 @@ import operator
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, AnyMessage
-from langchain_xai import ChatXAI
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
@@ -13,20 +12,10 @@ from hephaestus.helpers import Oligaton
 from database.graphiti_utils import load_information, make_group_id, insert_information
 from database.models import Character as CharacterModel
 from database.models.conversation import Conversation
-from tools.dice import roll_d20, roll_d10, roll_d6
+from utils.llm_models import npc_emotions, npc_should_respond, npc_thoughts, npc_narration
 from utils.prompts import plan_prompt_template, narrator_prompt_template, emotions_prompt_template, should_respond_prompt_template, character_episodic_memory
 
 logger = getLogger(__name__)
-
-
-
-
-def get_model(model: str = "grok-4-1-fast-reasoning", temperature: float = 1, max_retries: int = 3,**kwargs) -> ChatXAI:
-    return ChatXAI(model=model, temperature=temperature, max_retries=max_retries, **kwargs)
-
-model = get_model()
-tools = [roll_d20, roll_d10, roll_d6]
-tools_by_name = {tool.name: tool for tool in tools}
 
 class ShouldRespondDecision(BaseModel):
     should_respond: bool = Field(description="Whether the NPC should respond to the current message.")
@@ -48,7 +37,7 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
 
     other_characters = '\n\n\n'.join(other_characters)
 
-    emotional_state_model = get_model(model= "grok-4-1-fast-non-reasoning", temperature=0.3).with_structured_output(EmotionalState.model_json_schema(), strict=True)
+    emotional_state_model = npc_emotions.with_structured_output(EmotionalState.model_json_schema(), strict=True)
 
     emotional_state = EmotionalState(_key=character.name)
     class NPCState(BaseModel):
@@ -87,8 +76,17 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
             "name": character.name,
             "description": character.description,
             "messages": state.combined_messages})
-        decision_model = get_model(temperature=0.1).with_structured_output(ShouldRespondDecision)
-        response = await decision_model.ainvoke(prompt)
+        decision_model = npc_should_respond.with_structured_output(ShouldRespondDecision, strict=True, include_raw=True)
+        raw_result: dict = await decision_model.ainvoke(prompt)
+        parsing_error = raw_result.get("parsing_error")
+        if parsing_error:
+            logger.error(f"💥 {character.name} structured output parsing failed: {parsing_error}")
+            logger.debug(f"💥 Raw response: {raw_result.get('raw')}")
+            return END
+        response: ShouldRespondDecision = raw_result["parsed"]
+        if response is None:
+            logger.error(f"💥 {character.name} structured output parsed=None (no parsing_error). Raw: {raw_result.get('raw')}")
+            return END
         if response.should_respond:
             logger.info(f"✅ {character.name} decided to respond")
             # return ["lore_loader", "memories_loader"]
@@ -141,7 +139,7 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
             })
         logger.debug(f"🧠 Planner prompt: {prompt}")
 
-        thoughts = await get_model(top_p=0.95, temperature=0.8, max_tokens=1024).ainvoke(prompt)
+        thoughts = await npc_thoughts.ainvoke(prompt)
         if thoughts.content is None:
             logger.warning("🧠 Planner returned None, using empty Thoughts")
         logger.info(f"🧠 Planner response: {thoughts.content[:min(200, len(thoughts.content))]}...")
@@ -152,7 +150,7 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
 
         prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
 
-        response = await get_model(top_p=1).ainvoke(prompt)
+        response = await npc_narration.ainvoke(prompt)
         # if not response.content.startswith(f"**{character.name}**: "):
         #     response.content = f"**{character.name}**: {response.content}"
         response.name = character.name

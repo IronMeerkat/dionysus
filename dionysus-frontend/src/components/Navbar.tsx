@@ -27,6 +27,7 @@ const Navbar = ({ onToggleSidebar, sidebarOpen }: NavbarProps) => {
     { label: "Story Background", onClick: () => setStoryModalOpen(true), onKeyDown: () => setStoryModalOpen(true) },
     { label: "Location", onClick: () => setLocationModalOpen(true), onKeyDown: () => setLocationModalOpen(true) },
     { label: "Session Setup", onClick: () => navigate("/session-setup"), onKeyDown: () => navigate("/session-setup") },
+    { label: "Lore", onClick: () => navigate("/lore"), onKeyDown: () => navigate("/lore") },
   ];
 
   const toPhoneLink = (link: NavbarLink) => {

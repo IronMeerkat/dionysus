@@ -1,14 +1,15 @@
 import { create } from 'zustand'
 import { SocketService } from "../services/socketService";
-import type { onOffType } from "../types/socket";
+import type { onOffType, SendMessagePayload } from "../types/socket";
 
 interface SocketStoreState {
     socket: SocketService;
+    connectionId: number;
     setSocket: (socket: SocketService) => void;
     isConnected: () => boolean;
     connect: () => void;
     disconnect: () => void;
-    sendMessage: (content: string) => void;
+    sendMessage: (payload: SendMessagePayload) => void;
     initSession: (conversationId: number) => void;
     on: onOffType;
     off: onOffType;
@@ -17,8 +18,16 @@ interface SocketStoreState {
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ?? `http://${window.location.hostname}:8000`;
 
-export const useSocketStore = create<SocketStoreState>((set, get) => ({
-    socket: new SocketService(),
+const socketInstance = new SocketService();
+
+export const useSocketStore = create<SocketStoreState>((set, get) => {
+    socketInstance.onConnect = () => {
+        set((s) => ({ connectionId: s.connectionId + 1 }));
+    };
+
+    return {
+    socket: socketInstance,
+    connectionId: 0,
 
     setSocket: (socket) => set({ socket }),
     isConnected: () => {
@@ -33,9 +42,9 @@ export const useSocketStore = create<SocketStoreState>((set, get) => ({
         const { socket } = get();
         socket.disconnect();
     },
-    sendMessage: (content: string) => {
+    sendMessage: (payload: SendMessagePayload) => {
         const { socket } = get();
-        socket.sendMessage(content);
+        socket.sendMessage(payload);
     },
     initSession: (conversationId: number) => {
         const { socket } = get();
@@ -49,4 +58,4 @@ export const useSocketStore = create<SocketStoreState>((set, get) => ({
         const { socket } = get();
         socket.off(event, handler);
     },
-}));
+};});

@@ -20,5 +20,7 @@ character_episodic_memory = langfuse.get_prompt("character-episodic-memory")
 
 should_respond_prompt_template = get_langchain_prompt("should-respond")
 
+lore_creator_prompt_template = get_langchain_prompt("lore-creator")
+
 placeholder_location = langfuse.get_prompt("placeholder_location").prompt
 placeholder_scenario = langfuse.get_prompt("placeholder_scenario").prompt

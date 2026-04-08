@@ -47,3 +47,32 @@ export interface RenameConversationResponse {
   id: number;
   title: string;
 }
+
+export interface WorldResponse {
+  id: number;
+  name: string;
+  description: string;
+  entry_count: number;
+}
+
+export type IngestionStatus = "pending" | "ingested" | "failed";
+
+export interface LoreEntryListItem {
+  id: number;
+  title: string;
+  category: string | null;
+  ingestion_status: IngestionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LoreEntryResponse {
+  id: number;
+  title: string;
+  content: string;
+  category: string | null;
+  ingestion_status: IngestionStatus;
+  world_id: number;
+  created_at: string;
+  updated_at: string;
+}

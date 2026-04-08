@@ -6,6 +6,9 @@ import type {
   ConversationListResponse,
   FromConversationResponse,
   RenameConversationResponse,
+  WorldResponse,
+  LoreEntryListItem,
+  LoreEntryResponse,
 } from "../types/rest";
 
 const API_BASE =
@@ -117,6 +120,68 @@ export const restService = {
   deleteMessage(messageId: string): Promise<MessageResponse> {
     return request<MessageResponse>(`/messages/${messageId}`, {
       method: "DELETE",
+    });
+  },
+
+  // ---- Lore: Worlds ----
+
+  getWorlds(): Promise<WorldResponse[]> {
+    return request<WorldResponse[]>("/lore/worlds");
+  },
+
+  createWorld(name: string, description: string): Promise<WorldResponse> {
+    return request<WorldResponse>("/lore/worlds", {
+      method: "POST",
+      body: { name, description },
+    });
+  },
+
+  updateWorld(worldId: number, name: string, description: string): Promise<WorldResponse> {
+    return request<WorldResponse>(`/lore/worlds/${worldId}`, {
+      method: "PUT",
+      body: { name, description },
+    });
+  },
+
+  deleteWorld(worldId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/lore/worlds/${worldId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ---- Lore: Entries ----
+
+  getWorldEntries(worldId: number): Promise<LoreEntryListItem[]> {
+    return request<LoreEntryListItem[]>(`/lore/worlds/${worldId}/entries`);
+  },
+
+  getEntry(entryId: number): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/entries/${entryId}`);
+  },
+
+  createEntry(worldId: number, title: string, content: string, category: string | null): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/worlds/${worldId}/entries`, {
+      method: "POST",
+      body: { title, content, category },
+    });
+  },
+
+  updateEntry(entryId: number, title: string, content: string, category: string | null): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/entries/${entryId}`, {
+      method: "PUT",
+      body: { title, content, category },
+    });
+  },
+
+  deleteEntry(entryId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/lore/entries/${entryId}`, {
+      method: "DELETE",
+    });
+  },
+
+  reingestEntry(entryId: number): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/entries/${entryId}/reingest`, {
+      method: "POST",
     });
   },
 } as const;
