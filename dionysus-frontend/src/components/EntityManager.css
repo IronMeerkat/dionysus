@@ -1,0 +1,107 @@
+@reference "../index.css";
+
+.entity-page {
+  @apply flex flex-1 justify-center overflow-y-auto px-4 py-6;
+}
+
+.entity-container {
+  @apply flex w-full max-w-2xl flex-col gap-6;
+}
+
+.entity-section {
+  @apply rounded-xl border border-base-content/10 bg-base-200 p-6 shadow-lg;
+}
+
+.entity-section-header {
+  @apply mb-4 flex items-center justify-between;
+}
+
+.entity-section-title {
+  @apply text-lg font-bold text-base-content;
+}
+
+.entity-section-actions {
+  @apply flex gap-2;
+}
+
+.entity-list {
+  @apply flex flex-col gap-1;
+}
+
+.entity-row {
+  @apply flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-base-content/10 bg-base-100 px-4 py-3 text-left transition-colors;
+}
+
+.entity-row:hover {
+  @apply border-primary/40 bg-base-300;
+}
+
+.entity-row.selected {
+  @apply border-primary bg-primary/10;
+}
+
+.entity-row-name {
+  @apply text-sm font-medium text-base-content;
+}
+
+.entity-row-badges {
+  @apply flex items-center gap-2;
+}
+
+.entity-row-badge {
+  @apply rounded-full bg-base-content/10 px-2 py-0.5 text-xs text-base-content/60;
+}
+
+.entity-editor-form {
+  @apply flex flex-col gap-4;
+}
+
+.entity-label {
+  @apply flex flex-col gap-1 text-sm font-semibold text-base-content/70;
+}
+
+.entity-textarea {
+  @apply min-h-[12rem] resize-y font-mono text-sm leading-relaxed;
+}
+
+.entity-editor-actions {
+  @apply flex gap-2;
+}
+
+.entity-error {
+  @apply rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
+}
+
+.entity-empty {
+  @apply py-4 text-center text-sm text-base-content/40;
+}
+
+.entity-loading {
+  @apply py-20 text-center text-base-content/40;
+}
+
+/* ---- Description history ---- */
+
+.entity-history {
+  @apply flex flex-col gap-2;
+}
+
+.entity-history-title {
+  @apply text-sm font-semibold text-base-content/70;
+}
+
+.entity-history-item {
+  @apply rounded-lg border border-base-content/10 bg-base-100 px-4 py-3;
+}
+
+.entity-history-item.active {
+  @apply border-primary/40 bg-primary/5;
+}
+
+.entity-history-header {
+  @apply flex items-center justify-between text-xs text-base-content/50;
+}
+
+.entity-history-body {
+  @apply mt-2 whitespace-pre-wrap text-sm leading-relaxed text-base-content/80;
+}

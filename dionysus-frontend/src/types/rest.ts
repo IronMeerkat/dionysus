@@ -66,6 +66,29 @@ export interface LoreEntryListItem {
   updated_at: string;
 }
 
+// ---- Entity (Player / NPC) types ----
+
+export interface EntityListItem {
+  id: number;
+  name: string;
+  description: string | null;
+  description_version: number | null;
+  created_at: string;
+}
+
+export interface DescriptionVersion {
+  version: number;
+  body: string;
+  created_at: string;
+}
+
+export interface EntityDetailResponse {
+  id: number;
+  name: string;
+  created_at: string;
+  descriptions: DescriptionVersion[];
+}
+
 export interface LoreEntryResponse {
   id: number;
   title: string;

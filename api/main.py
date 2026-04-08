@@ -15,6 +15,8 @@ from api.routes.routes import router
 from api.routes.session import session_router
 from api.routes.conversations import conversations_router
 from api.routes.lore import lore_router
+from api.routes.players import players_router
+from api.routes.npcs import npcs_router
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,8 @@ register_lore_events(sio)
 app.include_router(session_router)
 app.include_router(conversations_router)
 app.include_router(lore_router)
+app.include_router(players_router)
+app.include_router(npcs_router)
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 @app.exception_handler(HTTPException)

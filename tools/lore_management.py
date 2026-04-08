@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 from logging import getLogger
+import re
 
 from langchain.tools import tool
 
@@ -15,6 +16,82 @@ from graphiti_core.nodes import EpisodeType
 logger = getLogger(__name__)
 
 RETRY_DELAYS = [5, 15, 45]
+TARGET_ENTRY_MIN_WORDS = 120
+TARGET_ENTRY_MAX_WORDS = 250
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w'-]+\b", text))
+
+
+def _split_paragraph_into_sentence_chunks(paragraph: str) -> list[str]:
+    """Split a long paragraph into sentence-aware chunks near target size."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", paragraph.strip()) if s.strip()]
+    if not sentences:
+        return []
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_words = 0
+
+    for sentence in sentences:
+        sentence_words = _word_count(sentence)
+        would_exceed = current and (current_words + sentence_words > TARGET_ENTRY_MAX_WORDS)
+        if would_exceed:
+            chunks.append(" ".join(current).strip())
+            current = [sentence]
+            current_words = sentence_words
+            continue
+
+        current.append(sentence)
+        current_words += sentence_words
+
+    if current:
+        chunks.append(" ".join(current).strip())
+    return chunks
+
+
+def _split_lore_content(content: str) -> list[str]:
+    """Create coherent lore chunks using paragraph-first, sentence-second splitting."""
+    normalized_content = content.strip()
+    if not normalized_content:
+        return []
+
+    if _word_count(normalized_content) <= TARGET_ENTRY_MAX_WORDS:
+        return [normalized_content]
+
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", normalized_content) if p.strip()]
+    if not paragraphs:
+        return [normalized_content]
+
+    chunks: list[str] = []
+    current_parts: list[str] = []
+    current_words = 0
+
+    def flush_current() -> None:
+        nonlocal current_parts, current_words
+        if current_parts:
+            chunks.append("\n\n".join(current_parts).strip())
+            current_parts = []
+            current_words = 0
+
+    for paragraph in paragraphs:
+        paragraph_words = _word_count(paragraph)
+        if paragraph_words > TARGET_ENTRY_MAX_WORDS:
+            flush_current()
+            sentence_chunks = _split_paragraph_into_sentence_chunks(paragraph)
+            chunks.extend([chunk for chunk in sentence_chunks if chunk])
+            continue
+
+        would_exceed = current_parts and (current_words + paragraph_words > TARGET_ENTRY_MAX_WORDS)
+        if would_exceed and current_words >= TARGET_ENTRY_MIN_WORDS:
+            flush_current()
+
+        current_parts.append(paragraph)
+        current_words += paragraph_words
+
+    flush_current()
+    return [chunk for chunk in chunks if chunk]
 
 
 def _update_ingestion_status(entry_id: int, status: str) -> None:
@@ -133,29 +210,54 @@ async def save_lore_entry(title: str, content: str, world_name: str, category: s
     """
     try:
         world = World.get_or_create(world_name)
+        chunks = _split_lore_content(content)
+        if not chunks:
+            return "❌ Failed to save lore entry: content is empty after normalization."
 
-        entry = LoreEntry(
-            world_id=world.id,
-            title=title,
-            content=content,
-            category=category,
-        )
-        session.add(entry)
+        should_suffix_titles = len(chunks) > 1
+        entries: list[LoreEntry] = []
+        for idx, chunk in enumerate(chunks, start=1):
+            chunk_title = f"{title} (Part {idx})" if should_suffix_titles else title
+            entry = LoreEntry(
+                world_id=world.id,
+                title=chunk_title,
+                content=chunk,
+                category=category,
+            )
+            entries.append(entry)
+            session.add(entry)
+
         session.commit()
-        logger.info(f"📜 Saved LoreEntry '{title}' (id={entry.id}) to Postgres")
-
-        spawn_ingestion_task(
-            entry_id=entry.id,
-            title=title,
-            content=content,
-            world_name=world_name,
-            group_id=world.graphiti_group_id,
+        logger.info(
+            f"📜 Saved {len(entries)} LoreEntry row(s) for '{title}' "
+            f"in world '{world_name}'"
         )
-        logger.info(f"📜 Postgres saved, Graphiti ingestion spawned in background for '{title}'")
 
+        for entry in entries:
+            spawn_ingestion_task(
+                entry_id=entry.id,
+                title=entry.title,
+                content=entry.content,
+                world_name=world_name,
+                group_id=world.graphiti_group_id,
+            )
+        logger.info(
+            f"📜 Postgres saved, spawned {len(entries)} Graphiti ingestion task(s) "
+            f"for base title '{title}'"
+        )
+
+        if len(entries) == 1:
+            entry = entries[0]
+            return (
+                f"✅ Saved '{entry.title}' (id={entry.id}) to world '{world_name}'. "
+                "Knowledge graph ingestion is running in the background."
+            )
+
+        entry_summaries = ", ".join([f"{entry.id}:{entry.title}" for entry in entries])
         return (
-            f"✅ Saved '{title}' (id={entry.id}) to world '{world_name}'. "
-            "Knowledge graph ingestion is running in the background."
+            f"✅ Saved {len(entries)} lore entries for base title '{title}' in world "
+            f"'{world_name}': {entry_summaries}. Knowledge graph ingestion is running "
+            "in the background for each entry."
         )
     except Exception as e:
         logger.exception(f"❌ Failed to save lore entry '{title}'")

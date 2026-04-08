@@ -9,6 +9,8 @@ import type {
   WorldResponse,
   LoreEntryListItem,
   LoreEntryResponse,
+  EntityListItem,
+  EntityDetailResponse,
 } from "../types/rest";
 
 const API_BASE =
@@ -182,6 +184,80 @@ export const restService = {
   reingestEntry(entryId: number): Promise<LoreEntryResponse> {
     return request<LoreEntryResponse>(`/lore/entries/${entryId}/reingest`, {
       method: "POST",
+    });
+  },
+
+  // ---- Players ----
+
+  getPlayerList(): Promise<EntityListItem[]> {
+    return request<EntityListItem[]>("/players/");
+  },
+
+  getPlayer(playerId: number): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/players/${playerId}`);
+  },
+
+  createPlayer(name: string, description: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>("/players/", {
+      method: "POST",
+      body: { name, description },
+    });
+  },
+
+  updatePlayerName(playerId: number, name: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/players/${playerId}`, {
+      method: "PUT",
+      body: { name },
+    });
+  },
+
+  addPlayerDescription(playerId: number, body: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/players/${playerId}/description`, {
+      method: "POST",
+      body: { body },
+    });
+  },
+
+  deletePlayer(playerId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/players/${playerId}`, {
+      method: "DELETE",
+    });
+  },
+
+  // ---- NPCs ----
+
+  getNpcList(): Promise<EntityListItem[]> {
+    return request<EntityListItem[]>("/npcs/");
+  },
+
+  getNpc(npcId: number): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/npcs/${npcId}`);
+  },
+
+  createNpc(name: string, description: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>("/npcs/", {
+      method: "POST",
+      body: { name, description },
+    });
+  },
+
+  updateNpcName(npcId: number, name: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/npcs/${npcId}`, {
+      method: "PUT",
+      body: { name },
+    });
+  },
+
+  addNpcDescription(npcId: number, body: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/npcs/${npcId}/description`, {
+      method: "POST",
+      body: { body },
+    });
+  },
+
+  deleteNpc(npcId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/npcs/${npcId}`, {
+      method: "DELETE",
     });
   },
 } as const;

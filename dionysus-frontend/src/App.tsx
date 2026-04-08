@@ -6,6 +6,8 @@ import Chat from './pages/Chat';
 import Lore from './pages/Lore';
 import LoreChat from './pages/LoreChat';
 import SessionSetup from './pages/SessionSetup';
+import Players from './pages/Players';
+import NPCs from './pages/NPCs';
 
 async function loadFlyonUI() {
   return import('flyonui/flyonui');
@@ -43,6 +45,8 @@ function App() {
         <Route path="/session-setup" element={<SessionSetup sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />}/>
         <Route path="/lore" element={<Lore />} />
         <Route path="/lore-chat" element={<LoreChat />} />
+        <Route path="/players" element={<Players />} />
+        <Route path="/npcs" element={<NPCs />} />
       </Routes>
     </div>
   );
