@@ -1,7 +1,7 @@
 import logging
 
 import socketio
-from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage, ToolMessageChunk
 from langchain_core.runnables import RunnableConfig
 
 from agents.lore_creator import spawn_lore_creator
@@ -86,9 +86,9 @@ def register_lore_events(sio: socketio.AsyncServer) -> None:
                         collected_text += token
                         await sio.emit("lore_token", {"token": token}, to=sid, namespace=LORE_NS)
 
-                elif isinstance(msg, ToolMessageChunk):
+                elif isinstance(msg, (ToolMessage, ToolMessageChunk)):
                     tool_content = str(msg.content) if msg.content else ""
-                    if "✅ Saved" in tool_content:
+                    if "✅ Saved" in tool_content or "📦 Queued" in tool_content:
                         title = tool_content.split("'")[1] if "'" in tool_content else "entry"
                         await sio.emit("lore_saving", {"title": title}, to=sid, namespace=LORE_NS)
                         logger.info(f"📜 [lore] Emitted lore_saving for '{title}'")

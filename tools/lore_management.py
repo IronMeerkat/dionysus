@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from database.graphiti_utils import load_information, make_group_id
 from database.graphiti_types import ENTITY_TYPES
-from database.neo4j_lore import create_entry, delete_entry, get_entry
+from database.graphiti_worlds import create_entry, delete_entry, get_entry, lore_group_id
 
 logger = getLogger(__name__)
 
@@ -70,7 +70,8 @@ async def save_lore_entry(title: str, content: str, world_name: str) -> str:
         if not content:
             return "❌ Failed to save lore entry: content is empty."
 
-        entry = await create_entry(world_name, title, content)
+        gid = lore_group_id(world_name)
+        entry = await create_entry(gid, title, content, source_description=f"lore_creator:{world_name}")
         logger.info(f"📜 Saved '{title}' (uuid={entry['uuid']}) to world '{world_name}'")
         return f"✅ Saved '{entry['title']}' (uuid={entry['uuid']}) to world '{world_name}'."
     except Exception as e:
@@ -97,7 +98,8 @@ async def bulk_save_lore_entries(entries: list[LoreEntryInput], world_name: str)
         failed = 0
         for entry in valid:
             try:
-                result = await create_entry(world_name, entry.title, entry.content.strip())
+                gid = lore_group_id(world_name)
+                result = await create_entry(gid, entry.title, entry.content.strip(), source_description=f"lore_creator:{world_name}")
                 logger.info(
                     f"📜 Bulk-saved '{entry.title}' (uuid={result['uuid']}) "
                     f"to world '{world_name}'"
@@ -133,10 +135,10 @@ async def delete_lore_entry(episode_uuid: str, world_name: str) -> str:
         if entry is None:
             return f"❌ No lore entry found with uuid={episode_uuid}."
 
-        if entry["world_name"] != world_name:
+        expected_gid = lore_group_id(world_name)
+        if entry["group_id"] != expected_gid:
             return (
-                f"❌ Entry {episode_uuid} belongs to world '{entry['world_name']}', "
-                f"not '{world_name}'."
+                f"❌ Entry {episode_uuid} does not belong to world '{world_name}'."
             )
 
         deleted = await delete_entry(episode_uuid)

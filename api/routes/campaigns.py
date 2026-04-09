@@ -32,6 +32,12 @@ def get_campaign(campaign_id: int) -> dict[str, object]:
     campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    npcs: dict[int, dict[str, object]] = {}
+    for conv in campaign.conversations:
+        for char in conv.characters:
+            if char.id not in npcs:
+                npcs[char.id] = {"id": char.id, "name": char.name}
+
     return {
         "id": campaign.id,
         "name": campaign.name,
@@ -45,6 +51,7 @@ def get_campaign(campaign_id: int) -> dict[str, object]:
             }
             for conv in campaign.conversations
         ],
+        "npcs": list(npcs.values()),
     }
 
 
@@ -67,6 +74,7 @@ def create_campaign(
         "lore_world": campaign.lore_world,
         "created_at": campaign.created_at.isoformat(),
         "conversations": [],
+        "npcs": [],
     }
 
 

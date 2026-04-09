@@ -1,0 +1,10 @@
+@reference "../index.css";
+
+.vm-modal-input {
+  @apply w-full;
+}
+
+.vm-modal-textarea {
+  @apply w-full resize-y leading-6;
+  min-height: 12rem;
+}

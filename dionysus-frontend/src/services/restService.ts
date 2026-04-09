@@ -278,4 +278,41 @@ export const restService = {
       method: "DELETE",
     });
   },
+
+  // ---- Character Memories ----
+
+  getCharacterMemoryEntries(campaignId: number, npcId: number): Promise<LoreEntryListItem[]> {
+    return request<LoreEntryListItem[]>(
+      `/character-memories/campaigns/${campaignId}/npcs/${npcId}/entries`,
+    );
+  },
+
+  getCharacterMemoryEntry(uuid: string): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/character-memories/entries/${uuid}`);
+  },
+
+  createCharacterMemoryEntry(
+    campaignId: number,
+    npcId: number,
+    title: string,
+    content: string,
+  ): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(
+      `/character-memories/campaigns/${campaignId}/npcs/${npcId}/entries`,
+      { method: "POST", body: { title, content } },
+    );
+  },
+
+  updateCharacterMemoryEntry(uuid: string, title: string, content: string): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/character-memories/entries/${uuid}`, {
+      method: "PUT",
+      body: { title, content },
+    });
+  },
+
+  deleteCharacterMemoryEntry(uuid: string): Promise<MessageResponse> {
+    return request<MessageResponse>(`/character-memories/entries/${uuid}`, {
+      method: "DELETE",
+    });
+  },
 } as const;

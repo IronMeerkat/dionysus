@@ -11,6 +11,7 @@ import NPCs from './pages/NPCs';
 import Campaigns from './pages/Campaigns';
 import CampaignDetail from './pages/CampaignDetail';
 import CreateCampaign from './pages/CreateCampaign';
+import CharacterMemories from './pages/CharacterMemories';
 
 async function loadFlyonUI() {
   return import('flyonui/flyonui');
@@ -53,6 +54,7 @@ function App() {
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/campaigns/new" element={<CreateCampaign />} />
         <Route path="/campaigns/:id" element={<CampaignDetail />} />
+        <Route path="/campaigns/:campaignId/npcs/:npcId/memories" element={<CharacterMemories />} />
       </Routes>
     </div>
   );

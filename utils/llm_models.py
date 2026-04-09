@@ -28,24 +28,34 @@ npc_should_respond = ChatXAI(
 # )
 
 npc_thoughts = ChatNanoGPT(
-    model="GLM-4.5-Air-Derestricted-Iceblink-v2", 
-    temperature=0.5, 
-    max_tokens=16000,
+    model="z-ai/glm-5v-turbo:thinking",
+    # model="Qwen3.5-27B-BlueStar-Derestricted",
+    temperature=0.7,
+    # extra_body={"min_p": 0.01},
     max_retries=4,
     frequency_penalty=0.4,
 )
 # npc_narration = ChatXAI(
-#     model="grok-4.20-beta-0309-reasoning", 
+#     model="grok-4-1-fast-reasoning", 
 #     top_p=1, 
 #     max_retries=4,
 # )
 
 npc_narration = ChatNanoGPT(
-    model="Llama-3.3-70B-Forgotten-Abomination-v5.0", 
-    temperature=0.8, 
+    model="z-ai/glm-5v-turbo",
+    # model="Llama-3.3-70B-Strawberrylemonade-v1.2",
+    temperature=0.8,
+    # extra_body={"min_p": 0.01},
     presence_penalty=0.2,
     max_retries=4,
 )
+
+# npc_narration = ChatNanoGPT(
+#     model="GLM-4.5-Air-Derestricted-Iceblink-v2", 
+#     temperature=0.7, 
+#     # presence_penalty=0.2,
+#     max_retries=4,
+# )
 
 scene_change = ChatXAI(
     model="grok-4-1-fast", 
@@ -54,18 +64,18 @@ scene_change = ChatXAI(
     max_retries=3,
 )
 
-# lore_creator = ChatXAI(
-#     model="grok-4-1-fast-reasoning",
-#     temperature=0.7,
-#     max_retries=3,
-# )
-
-lore_creator = ChatNanoGPT(
-    model="Qwen3.5-27B-BlueStar-Derestricted", 
-    temperature=0.8, 
-    presence_penalty=0.2,
-    max_retries=4,
+lore_creator = ChatXAI(
+    model="grok-4.20-beta-0309-reasoning",
+    temperature=0.8,
+    max_retries=3,
 )
+
+# lore_creator = ChatNanoGPT(
+#     model="Qwen3.5-27B-BlueStar-Derestricted",
+#     temperature=0.8,
+#     presence_penalty=0.2,
+#     max_retries=4,
+# )
 
 memory_filter = ChatXAI(
     model="grok-4-1-fast-non-reasoning",

@@ -18,6 +18,7 @@ from api.routes.lore import lore_router
 from api.routes.players import players_router
 from api.routes.npcs import npcs_router
 from api.routes.campaigns import campaigns_router
+from api.routes.character_memories import character_memories_router
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ app.include_router(lore_router)
 app.include_router(players_router)
 app.include_router(npcs_router)
 app.include_router(campaigns_router)
+app.include_router(character_memories_router)
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 @app.exception_handler(HTTPException)

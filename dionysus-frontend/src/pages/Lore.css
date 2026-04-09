@@ -72,6 +72,10 @@
   @apply flex gap-2;
 }
 
+.vm-entity-badge {
+  @apply ml-auto shrink-0 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info;
+}
+
 .lore-error {
   @apply rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
 }

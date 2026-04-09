@@ -57,6 +57,8 @@ export interface LoreEntryListItem {
   uuid: string;
   title: string;
   created_at: string;
+  kind?: "episode" | "entity";
+  entity_type?: string;
 }
 
 // ---- Entity (Player / NPC) types ----
@@ -88,6 +90,8 @@ export interface LoreEntryResponse {
   content: string;
   world_name: string;
   created_at: string;
+  kind?: "episode" | "entity";
+  entity_type?: string;
 }
 
 // ---- Campaign types ----
@@ -106,10 +110,26 @@ export interface CampaignConversation {
   created_at: string;
 }
 
+export interface CampaignNpc {
+  id: number;
+  name: string;
+}
+
 export interface CampaignDetailResponse {
   id: number;
   name: string;
   lore_world: string;
   created_at: string;
   conversations: CampaignConversation[];
+  npcs: CampaignNpc[];
+}
+
+// ---- Vector Memory API abstraction ----
+
+export interface VectorMemoryApi {
+  getEntries: () => Promise<LoreEntryListItem[]>;
+  getEntry: (uuid: string) => Promise<LoreEntryResponse>;
+  createEntry: (title: string, content: string) => Promise<LoreEntryResponse>;
+  updateEntry: (uuid: string, title: string, content: string) => Promise<LoreEntryResponse>;
+  deleteEntry: (uuid: string) => Promise<unknown>;
 }

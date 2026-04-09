@@ -177,6 +177,40 @@ const CampaignDetail = () => {
           ))}
         </div>
       )}
+
+      {campaign.npcs.length > 0 && (
+        <>
+          <hr className="campaign-detail-divider" />
+
+          <div className="campaign-detail-section-header">
+            <h3 className="campaign-detail-section-title">NPCs</h3>
+          </div>
+
+          <div className="campaign-detail-grid">
+            {campaign.npcs.map((npc) => (
+              <div
+                key={npc.id}
+                className="campaign-npc-card"
+                role="button"
+                tabIndex={0}
+                onClick={() =>
+                  navigate(
+                    `/campaigns/${campaign.id}/npcs/${npc.id}/memories`,
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter")
+                    navigate(
+                      `/campaigns/${campaign.id}/npcs/${npc.id}/memories`,
+                    );
+                }}
+              >
+                <div className="campaign-npc-name">{npc.name}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 };
