@@ -12,6 +12,7 @@ import type {
   StreamStartPayload,
   StreamTokenPayload,
   StreamEndPayload,
+  MessagesPersistedPayload,
 } from "../types/socket";
 import "./Chat.css";
 
@@ -22,7 +23,7 @@ interface ChatProps {
 
 const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
   const socket = useSocketStore();
-  const { messages, addUserMessage, confirmUserMessage, startStream, appendToken, finalizeStream } = useMessageStore();
+  const { messages, addUserMessage, confirmUserMessage, replaceMessageId, startStream, appendToken, finalizeStream } = useMessageStore();
   const { player, characters } = useSessionStore();
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
   const activeConversationTitle = useConversationStore((s) => s.activeConversationTitle);
@@ -78,10 +79,17 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
       finalizeStream(messageId);
     };
 
+    const handleMessagesPersisted = ({ mapping }: MessagesPersistedPayload) => {
+      for (const { oldId, newId } of mapping) {
+        replaceMessageId(oldId, newId);
+      }
+    };
+
     socket.on("message_created", handleMessageCreated);
     socket.on("stream_start", handleStreamStart);
     socket.on("stream_token", handleStreamToken);
     socket.on("stream_end", handleStreamEnd);
+    socket.on("messages_persisted", handleMessagesPersisted);
 
     socket.connect();
 
@@ -90,8 +98,9 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
       socket.off("stream_start", handleStreamStart);
       socket.off("stream_token", handleStreamToken);
       socket.off("stream_end", handleStreamEnd);
+      socket.off("messages_persisted", handleMessagesPersisted);
     };
-  }, [socket, confirmUserMessage, startStream, appendToken, finalizeStream]);
+  }, [socket, confirmUserMessage, replaceMessageId, startStream, appendToken, finalizeStream]);
 
   const connectionId = useSocketStore((s) => s.connectionId);
 

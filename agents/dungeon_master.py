@@ -52,7 +52,8 @@ def spawn_dungeon_master(conversation: Conversation, name: str = 'dungeon_master
         conversation.message_buffer.extend(state.messages)
 
         for message in state.messages:
-            conversation.add_message(message.type, message.content, message.name)
+            msg_uuid = uuid.UUID(message.id) if message.id else None
+            conversation.add_message(message.type, message.content, message.name, _id=msg_uuid)
 
         ids = [msg.id for msg in conversation.message_buffer]
         dupes = len(ids) - len(set(ids))

@@ -106,6 +106,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
         await sio.emit("message_created", {"messageId": msg_id}, to=sid)
         logger.info(f"🪪 message_created emitted: id={msg_id}")
 
+
         config = RunnableConfig(callbacks=[langfuse_callback_handler])
 
         try:
@@ -116,8 +117,18 @@ def register_events(sio: socketio.AsyncServer) -> None:
                 subgraphs=True,
             )
 
+            pre_ai_count = sum(1 for m in conversation.messages if m.role == "ai")
+
             handler = SocketStreamHandler(sio, sid, [c.name for c in conversation.characters])
             await handler.process(stream)
+
+            if handler.message_ids:
+                new_ai_msgs = [m for m in conversation.messages if m.role == "ai"][pre_ai_count:]
+                id_map = [
+                    {"oldId": stream_id, "newId": str(db_msg.id)}
+                    for stream_id, db_msg in zip(handler.message_ids, new_ai_msgs)
+                ]
+                await sio.emit("messages_persisted", {"mapping": id_map}, to=sid)
 
         except Exception:
             logger.exception(f"💥 Stream error for sid={sid}")

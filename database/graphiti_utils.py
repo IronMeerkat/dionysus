@@ -116,8 +116,13 @@ def _log_background_task_exception(task: asyncio.Task[None]) -> None:
 
 
 def fire_and_forget(coro: object) -> asyncio.Task[None]:
-    """Schedule a coroutine as a background task with automatic error logging."""
-    task = asyncio.create_task(coro)
+    """Schedule a coroutine as a background task with automatic error logging.
+
+    Uses a blank ``contextvars.Context`` so LangChain/LangGraph streaming
+    callbacks from the calling graph node are NOT inherited by the task.
+    """
+    import contextvars
+    task = asyncio.create_task(coro, context=contextvars.Context())
     task.add_done_callback(_log_background_task_exception)
     return task
 

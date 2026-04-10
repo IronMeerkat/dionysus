@@ -51,6 +51,7 @@ class SocketStreamHandler:
         self._current_speaker: str | None = None
         self._prefix_buffer: str = ""
         self._prefix_stripped: bool = False
+        self.message_ids: list[str] = []
 
     async def _start_new_message(self, speaker: str) -> None:
         if self._current_message_id:
@@ -64,6 +65,7 @@ class SocketStreamHandler:
         self._current_speaker = speaker
         self._prefix_buffer = ""
         self._prefix_stripped = False
+        self.message_ids.append(self._current_message_id)
         await self.sio.emit(
             "stream_start",
             {"messageId": self._current_message_id, "name": speaker},

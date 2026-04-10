@@ -20,6 +20,10 @@ export interface SocketErrorPayload {
   message: string;
 }
 
+export interface MessagesPersistedPayload {
+  mapping: { oldId: string; newId: string }[];
+}
+
 export interface SendMessagePayload {
   conversation_id: number;
   content: string;
@@ -45,6 +49,7 @@ export interface ServerToClientEvents {
   stream_start: (payload: StreamStartPayload) => void;
   stream_token: (payload: StreamTokenPayload) => void;
   stream_end: (payload: StreamEndPayload) => void;
+  messages_persisted: (payload: MessagesPersistedPayload) => void;
   session_ready: (payload: SessionReadyPayload) => void;
   error: (payload: SocketErrorPayload) => void;
 }
