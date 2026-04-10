@@ -83,3 +83,26 @@ export interface LoreClientToServerEvents {
   init_lore_session: (payload: { world_name: string }) => void;
   lore_message: (payload: { content: string }) => void;
 }
+
+// ---- NPC Builder namespace (/npc-builder) ----
+
+export interface NPCBuilderTokenPayload {
+  token: string;
+}
+
+export interface NPCBuilderCreatedPayload {
+  name: string;
+}
+
+export interface NPCBuilderServerToClientEvents {
+  npc_builder_session_ready: (payload: { world_name: string }) => void;
+  npc_builder_token: (payload: NPCBuilderTokenPayload) => void;
+  npc_builder_created: (payload: NPCBuilderCreatedPayload) => void;
+  npc_builder_done: () => void;
+  error: (payload: SocketErrorPayload) => void;
+}
+
+export interface NPCBuilderClientToServerEvents {
+  init_npc_builder: (payload: { world_name: string }) => void;
+  npc_builder_message: (payload: { content: string }) => void;
+}

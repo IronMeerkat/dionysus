@@ -88,3 +88,9 @@ memory_filter = ChatXAI(
     temperature=0.1,
     max_retries=3,
 )
+
+npc_builder = ChatXAI(
+    model="grok-4-1-fast-reasoning",
+    temperature=0.8,
+    max_retries=3,
+)

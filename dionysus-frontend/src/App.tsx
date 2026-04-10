@@ -12,6 +12,7 @@ import Campaigns from './pages/Campaigns';
 import CampaignDetail from './pages/CampaignDetail';
 import CreateCampaign from './pages/CreateCampaign';
 import CharacterMemories from './pages/CharacterMemories';
+import NPCBuilderChat from './pages/NPCBuilderChat';
 
 async function loadFlyonUI() {
   return import('flyonui/flyonui');
@@ -51,6 +52,7 @@ function App() {
         <Route path="/lore-chat" element={<LoreChat />} />
         <Route path="/players" element={<Players />} />
         <Route path="/npcs" element={<NPCs />} />
+        <Route path="/npc-builder" element={<NPCBuilderChat />} />
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/campaigns/new" element={<CreateCampaign />} />
         <Route path="/campaigns/:id" element={<CampaignDetail />} />

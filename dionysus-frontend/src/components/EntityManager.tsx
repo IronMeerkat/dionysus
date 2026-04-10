@@ -29,9 +29,10 @@ interface EntityManagerProps {
   title: string;
   entityLabel: string;
   api: EntityManagerApi;
+  extraActions?: React.ReactNode;
 }
 
-const EntityManager = ({ title, entityLabel, api }: EntityManagerProps) => {
+const EntityManager = ({ title, entityLabel, api, extraActions }: EntityManagerProps) => {
   const [entities, setEntities] = useState<EntityListItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [descriptions, setDescriptions] = useState<DescriptionVersion[]>([]);
@@ -225,6 +226,7 @@ const EntityManager = ({ title, entityLabel, api }: EntityManagerProps) => {
           <div className="entity-section-header">
             <h2 className="entity-section-title">{title}</h2>
             <div className="entity-section-actions">
+              {extraActions}
               <button
                 type="button"
                 className="btn btn-sm btn-outline btn-primary"
