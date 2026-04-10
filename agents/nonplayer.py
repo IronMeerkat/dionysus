@@ -3,7 +3,7 @@ from typing import Annotated
 import operator
 from uuid import uuid4
 
-from langchain_core.messages import HumanMessage, AnyMessage
+from langchain_core.messages import AIMessage, HumanMessage, AnyMessage
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
@@ -141,17 +141,25 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
         thoughts = await npc_thoughts.ainvoke(prompt)
         if thoughts.content is None:
             logger.warning("🧠 Planner returned None, using empty Thoughts")
-        logger.info(f"🧠 Planner response: {thoughts.content[:min(200, len(thoughts.content))]}...")
-        return {'thoughts': thoughts.content, 'messages': []}
+
+        tagged = f"## {character.name} THOUGHTS:\n{thoughts.content}"
+        logger.info(f"🧠 Planner response: {tagged[:min(200, len(tagged))]}...")
+        return {'thoughts': tagged, 'messages': []}
 
 
     async def npc_narrator(state: NPCState) -> NPCState:
 
         prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
+        prompt.messages.append(AIMessage(content=f"{character.name}:"))
 
         response = await npc_narration.ainvoke(prompt)
-        # if not response.content.startswith(f"**{character.name}**: "):
-        #     response.content = f"**{character.name}**: {response.content}"
+
+        content = response.content.strip()
+        prefix = f"{character.name}:"
+        if content.startswith(prefix):
+            content = content[len(prefix):].lstrip()
+        response.content = f"{character.name}: {content}"
+
         response.name = character.name
         response.id = str(uuid4())
         fire_and_forget(process_and_save_memory(

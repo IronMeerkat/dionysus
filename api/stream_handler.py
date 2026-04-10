@@ -49,6 +49,8 @@ class SocketStreamHandler:
         self.character_list = character_list
         self._current_message_id: str | None = None
         self._current_speaker: str | None = None
+        self._prefix_buffer: str = ""
+        self._prefix_stripped: bool = False
 
     async def _start_new_message(self, speaker: str) -> None:
         if self._current_message_id:
@@ -60,12 +62,52 @@ class SocketStreamHandler:
 
         self._current_message_id = str(uuid4())
         self._current_speaker = speaker
+        self._prefix_buffer = ""
+        self._prefix_stripped = False
         await self.sio.emit(
             "stream_start",
             {"messageId": self._current_message_id, "name": speaker},
             to=self.sid,
         )
         logger.debug("🎬 stream_start: speaker=%s, id=%s", speaker, self._current_message_id)
+
+    async def _emit_stripped_token(self, content: str, speaker: str) -> None:
+        """Buffer initial tokens to strip the `Name: ` prefix, then forward the rest."""
+        if self._prefix_stripped:
+            await self.sio.emit(
+                "stream_token",
+                {"messageId": self._current_message_id, "token": content},
+                to=self.sid,
+            )
+            return
+
+        self._prefix_buffer += content
+        expected = f"{speaker}: "
+
+        if len(self._prefix_buffer) >= len(expected):
+            if self._prefix_buffer.startswith(expected):
+                remainder = self._prefix_buffer[len(expected):]
+                self._prefix_stripped = True
+                if remainder:
+                    await self.sio.emit(
+                        "stream_token",
+                        {"messageId": self._current_message_id, "token": remainder},
+                        to=self.sid,
+                    )
+            else:
+                self._prefix_stripped = True
+                await self.sio.emit(
+                    "stream_token",
+                    {"messageId": self._current_message_id, "token": self._prefix_buffer},
+                    to=self.sid,
+                )
+        elif not expected.startswith(self._prefix_buffer):
+            self._prefix_stripped = True
+            await self.sio.emit(
+                "stream_token",
+                {"messageId": self._current_message_id, "token": self._prefix_buffer},
+                to=self.sid,
+            )
 
     async def _handle_ai_chunk(
         self, msg: AIMessageChunk, ns_path: list[str], langgraph_node: str
@@ -77,11 +119,7 @@ class SocketStreamHandler:
                 await self._start_new_message(speaker)
 
             if msg.content and self._current_message_id:
-                await self.sio.emit(
-                    "stream_token",
-                    {"messageId": self._current_message_id, "token": msg.content},
-                    to=self.sid,
-                )
+                await self._emit_stripped_token(msg.content, speaker)
         elif langgraph_node == NODE_PLANNER:
             logger.debug("🧠 Planner chunk from %s (skipping for now)", speaker)
 
