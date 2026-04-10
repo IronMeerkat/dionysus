@@ -94,3 +94,16 @@ npc_builder = ChatXAI(
     temperature=0.8,
     max_retries=3,
 )
+
+dm_planner_model = ChatXAI(
+    model="grok-4-1-fast-reasoning",
+    temperature=0.4,
+    max_retries=3,
+)
+
+dm_narrator_model = ChatNanoGPT(
+    model="z-ai/glm-5v-turbo",
+    temperature=0.85,
+    presence_penalty=0.3,
+    max_retries=4,
+)

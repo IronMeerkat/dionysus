@@ -187,3 +187,168 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
     graph.add_edge("npc_narrator", END)
 
     return graph.compile(name=character.name)
+
+
+def spawn_npc_directed(
+    character: CharacterModel,
+    conversation: Conversation,
+    directive: object,
+) -> StateGraph:
+    """Build an NPC graph that skips should_respond and accepts DM directives.
+
+    The DM has already decided this NPC should speak. The ``directive``
+    object provides ``.guidance`` (what to focus on) and ``.withheld_info``
+    (facts to avoid revealing).
+    """
+
+    dm_guidance: str = getattr(directive, "guidance", "")
+    withheld_info: list[str] = getattr(directive, "withheld_info", [])
+
+    other_characters = [
+        f"**{c.name}**:\n{c.description}"
+        for c in conversation.characters
+        if c.id != character.id
+    ]
+    other_characters_str = "\n\n\n".join(other_characters)
+
+    emotional_state_model = npc_emotions.with_structured_output(
+        EmotionalState.model_json_schema(), strict=True
+    )
+    emotional_state = EmotionalState(_key=character.name)
+
+    withheld_block = ""
+    if withheld_info:
+        withheld_block = (
+            "\n[INFORMATION YOU DO NOT KNOW - never reference these facts]\n"
+            + "\n".join(f"- {fact}" for fact in withheld_info)
+        )
+
+    class DirectedNPCState(BaseModel):
+        messages: Annotated[list[AnyMessage], operator.add]
+        thoughts: str = Field(default="")
+        lore: str = Field(default="")
+        memories: str = Field(default="")
+
+        @property
+        def combined_messages(self) -> list[AnyMessage]:
+            combo = [*conversation.message_buffer, *self.messages]
+            limit = min(12, len(combo))
+            return combo[-limit:]
+
+        @property
+        def emotional_state(self) -> str:
+            raw = emotional_state.model_dump(exclude_unset=True)
+            return "\n".join(f"{k}: {v}" for k, v in raw.items())
+
+        @property
+        def combined_dump(self) -> dict:
+            return {
+                "name": character.name,
+                "description": character.description + withheld_block,
+                "other_characters": other_characters_str,
+                "player": conversation.player.description,
+                "location": conversation.location,
+                "story_background": conversation.story_background,
+                "messages": self.combined_messages,
+                "emotional_state": self.emotional_state,
+                "dm_guidance": dm_guidance,
+                **self.model_dump(exclude={"messages"}),
+            }
+
+    async def lore_loader(state: DirectedNPCState) -> DirectedNPCState:
+        last_human = next(
+            (m for m in reversed(state.messages) if isinstance(m, HumanMessage)),
+            None,
+        )
+        query = last_human.content if last_human else character.name
+        lore = await load_information(
+            query=query,
+            group_ids=[make_group_id("lore", conversation.campaign.lore_world)],
+        )
+        return {"lore": lore, "messages": []}
+
+    async def memories_loader(state: DirectedNPCState) -> DirectedNPCState:
+        last_human = next(
+            (m for m in reversed(state.messages) if isinstance(m, HumanMessage)),
+            None,
+        )
+        query = last_human.content if last_human else character.name
+        memories = await load_information(
+            query=query,
+            group_ids=[
+                make_memory_group_id(conversation.campaign.id, character.name),
+            ],
+            limit=20,
+        )
+        return {"memories": memories, "messages": []}
+
+    async def emotion_updater(state: DirectedNPCState) -> DirectedNPCState:
+        prompt = await emotions_prompt_template.ainvoke(state.combined_dump)
+        logger.debug(f"💖 Emotion updater prompt built for {character.name}")
+
+        delta = await emotional_state_model.ainvoke(prompt)
+        logger.info(f"💖 Emotion delta for {character.name}: {delta}")
+
+        for field_name, value in delta.items():
+            current_value = getattr(emotional_state, field_name)
+            new_value = max(-20, min(20, current_value + value))
+            setattr(emotional_state, field_name, new_value)
+
+        return {"messages": []}
+
+    async def planner(state: DirectedNPCState) -> DirectedNPCState:
+        prompt = await plan_prompt_template.ainvoke({
+            **state.combined_dump,
+            "emotional_state": state.emotional_state,
+        })
+        logger.debug(f"🧠 Directed planner prompt for {character.name}")
+
+        thoughts = await npc_thoughts.ainvoke(prompt)
+        if thoughts.content is None:
+            logger.warning(f"🧠 {character.name} planner returned None")
+
+        tagged = f"## {character.name} THOUGHTS:\n{thoughts.content}"
+        logger.info(f"🧠 {character.name}: {tagged[:min(200, len(tagged))]}...")
+        return {"thoughts": tagged, "messages": []}
+
+    async def npc_narrator(state: DirectedNPCState) -> DirectedNPCState:
+        prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
+        prompt.messages.append(AIMessage(content=f"{character.name}:"))
+
+        response = await npc_narration.ainvoke(prompt)
+
+        content = response.content.strip()
+        prefix = f"{character.name}:"
+        if content.startswith(prefix):
+            content = content[len(prefix):].lstrip()
+        response.content = f"{character.name}: {content}"
+
+        response.name = character.name
+        response.id = str(uuid4())
+        fire_and_forget(process_and_save_memory(
+            messages=state.combined_messages,
+            group_id=make_memory_group_id(conversation.campaign.id, character.name),
+            source_description=f"session:{conversation.campaign.lore_world}",
+            perspective=character_episodic_memory.compile(
+                name=character.name, description=character.description
+            ),
+            character_name=character.name,
+            character_description=character.description,
+        ))
+        return {"messages": [response]}
+
+    graph = StateGraph(DirectedNPCState)
+    graph.add_node("lore_loader", lore_loader)
+    graph.add_node("memories_loader", memories_loader)
+    graph.add_node("emotion_updater", emotion_updater)
+    graph.add_node("planner", planner)
+    graph.add_node("npc_narrator", npc_narrator)
+
+    graph.add_edge(START, "lore_loader")
+    graph.add_edge(START, "memories_loader")
+    graph.add_edge(["lore_loader", "memories_loader"], "emotion_updater")
+    graph.add_edge("emotion_updater", "planner")
+    graph.add_edge("planner", "npc_narrator")
+    graph.add_edge("npc_narrator", END)
+
+    return graph.compile(name=character.name)

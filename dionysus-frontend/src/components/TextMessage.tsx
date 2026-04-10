@@ -29,8 +29,11 @@ function AvatarPlaceholder({ name }: { name: string }) {
   );
 }
 
+const NARRATOR_NAME = "Narrator";
+
 const TextMessage = ({ message }: TextMessageProps) => {
   const isUser = message.role === "user";
+  const isNarrator = message.name === NARRATOR_NAME;
   const alignment = isUser ? "chat-sender" : "chat-receiver";
   const updateMessageContent = useMessageStore((s) => s.updateMessageContent);
   const removeMessage = useMessageStore((s) => s.removeMessage);
@@ -72,6 +75,36 @@ const TextMessage = ({ message }: TextMessageProps) => {
       textareaRef.current?.select();
     }
   }, [editing, resizeTextarea]);
+
+  if (isNarrator) {
+    return (
+      <div className="narrator-message" onDoubleClick={startEditing}>
+        <div className="narrator-label">
+          {NARRATOR_NAME}
+          <time className="text-message-time"> {formatTime(message.createdAt)}</time>
+        </div>
+        <div className={`narrator-content ${editing ? "chat-bubble-editing" : ""}`}>
+          {editing ? (
+            <form onSubmit={(e) => { e.preventDefault(); editMessage(); }}>
+              <textarea
+                ref={textareaRef}
+                value={editContent}
+                onChange={(e) => { setEditContent(e.target.value); requestAnimationFrame(resizeTextarea); }}
+                onBlur={(e) => {
+                  if (e.relatedTarget && e.currentTarget.form?.contains(e.relatedTarget)) return;
+                  cancelEditing();
+                }}
+              />
+              <button type="submit" className="chat-title-save">Save</button>
+              <button type="button" className="chat-title-delete" onClick={deleteMessage}>Delete</button>
+            </form>
+          ) : (
+            <div style={{ whiteSpace: "pre-wrap" }}>{message.content}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`chat ${alignment}`}>

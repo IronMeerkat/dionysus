@@ -1,8 +1,8 @@
 """
-📡 Socket.IO stream handler for NPC assistant responses.
+📡 Socket.IO stream handler for game session responses.
 
 Processes LangGraph stream output and emits Socket.IO events
-(stream_start, stream_token, stream_end) with character attribution.
+(stream_start, stream_token, stream_end) with character/narrator attribution.
 """
 from logging import getLogger
 from uuid import uuid4
@@ -10,21 +10,43 @@ from uuid import uuid4
 import socketio
 from langchain_core.messages import AIMessageChunk, ToolMessageChunk
 
+from agents.dungeon_master import NARRATOR_NAME
+
 
 logger = getLogger(__name__)
 
 NODE_PLANNER = "planner"
 NODE_USE_TOOLS = "use_tools"
 NODE_NARRATOR = "npc_narrator"
-NARRATOR_NODES = frozenset({NODE_PLANNER, NODE_USE_TOOLS, NODE_NARRATOR})
+NODE_DM_NARRATOR_OPENING = "dm_narrator_opening"
+NODE_DM_NARRATOR_CLOSING = "dm_narrator_closing"
 
-def resolve_speaker(character_list: list[str], path: list[str]) -> str:
-    """Resolve character name from stream metadata. Innermost path element wins."""
+STREAMABLE_NODES = frozenset({
+    NODE_DM_NARRATOR_OPENING,
+    NODE_DM_NARRATOR_CLOSING,
+})
+
+DM_NARRATOR_NODES = frozenset({NODE_DM_NARRATOR_OPENING, NODE_DM_NARRATOR_CLOSING})
+
+SKIP_NODES = frozenset({NODE_PLANNER, NODE_USE_TOOLS})
+
+
+def resolve_speaker(character_list: list[str], path: list[str], langgraph_node: str) -> str:
+    """Resolve speaker name from stream metadata.
+
+    DM narrator nodes always return the Narrator name.
+    For NPC nodes, the innermost path element matching a character wins.
+    """
+    if langgraph_node in DM_NARRATOR_NODES:
+        return NARRATOR_NAME
+
     if len(character_list) == 1:
         return character_list[0]
-    
+
     matching = [c for c in path if c in character_list]
-    return matching[-1]
+    if matching:
+        return matching[-1]
+    return NARRATOR_NAME
 
 
 def path_from_namespace(namespace: tuple[str, ...]) -> list[str]:
@@ -49,6 +71,7 @@ class SocketStreamHandler:
         self.character_list = character_list
         self._current_message_id: str | None = None
         self._current_speaker: str | None = None
+        self._current_node: str | None = None
         self._prefix_buffer: str = ""
         self._prefix_stripped: bool = False
         self.message_ids: list[str] = []
@@ -114,20 +137,27 @@ class SocketStreamHandler:
     async def _handle_ai_chunk(
         self, msg: AIMessageChunk, ns_path: list[str], langgraph_node: str
     ) -> None:
-        speaker = resolve_speaker(self.character_list, ns_path)
+        if langgraph_node in SKIP_NODES:
+            logger.debug("🧠 %s chunk (internal, not streamed)", langgraph_node)
+            return
 
-        if langgraph_node == NODE_NARRATOR:
-            if speaker != self._current_speaker:
-                await self._start_new_message(speaker)
+        if langgraph_node not in STREAMABLE_NODES:
+            return
 
-            if msg.content and self._current_message_id:
-                await self._emit_stripped_token(msg.content, speaker)
-        elif langgraph_node == NODE_PLANNER:
-            logger.debug("🧠 Planner chunk from %s (skipping for now)", speaker)
+        speaker = resolve_speaker(self.character_list, ns_path, langgraph_node)
+        skip_prefix = langgraph_node in DM_NARRATOR_NODES
+
+        if speaker != self._current_speaker or langgraph_node != self._current_node:
+            await self._start_new_message(speaker)
+            self._current_node = langgraph_node
+            if skip_prefix:
+                self._prefix_stripped = True
+
+        if msg.content and self._current_message_id:
+            await self._emit_stripped_token(msg.content, speaker)
 
     async def _handle_tool_chunk(self, msg: ToolMessageChunk, ns_path: list[str]) -> None:
-        speaker = resolve_speaker(self.character_list, ns_path)
-        logger.debug("🔧 Tool chunk from %s: %s", speaker, msg.content[:80] if msg.content else "")
+        logger.debug("🔧 Tool chunk: %s", msg.content[:80] if msg.content else "")
 
     async def process(self, stream: object) -> None:
         """Iterate the LangGraph stream and emit Socket.IO events."""

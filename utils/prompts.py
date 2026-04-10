@@ -26,5 +26,8 @@ memory_significance_prompt = get_langchain_prompt("memory-significance-filter")
 
 npc_builder_prompt_template = get_langchain_prompt("npc-builder")
 
+dm_planner_prompt_template = get_langchain_prompt("dm-planner")
+dm_narrator_prompt_template = get_langchain_prompt("dm-narrator")
+
 placeholder_location = langfuse.get_prompt("placeholder_location").prompt
 placeholder_scenario = langfuse.get_prompt("placeholder_scenario").prompt

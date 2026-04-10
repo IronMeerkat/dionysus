@@ -33,6 +33,16 @@ def make_memory_group_id(campaign_id: int, character_name: str) -> str:
     return make_group_id("memories", f"campaign_{campaign_id}_{character_name}")
 
 
+def make_events_group_id(campaign_id: int) -> str:
+    """Build a group_id for world events tied to a campaign."""
+    return make_group_id("events", f"campaign_{campaign_id}")
+
+
+def make_secrets_group_id(campaign_id: int) -> str:
+    """Build a group_id for DM-only secret knowledge tied to a campaign."""
+    return make_group_id("dm_secrets", f"campaign_{campaign_id}")
+
+
 async def load_information(
     query: str,
     group_ids: list[str] | None = None,
@@ -178,6 +188,63 @@ async def process_and_save_memory(
         custom_extraction_instructions=perspective,
     )
     logger.debug(f"💾 {character_name}: memory episode persisted")
+
+
+async def save_world_events(
+    events: list[str],
+    campaign_id: int,
+    lore_world: str,
+) -> None:
+    """Persist world events produced by the DM to Graphiti."""
+    if not events:
+        return
+
+    group_id = make_events_group_id(campaign_id)
+    body = "\n".join(events)
+    name = f"world_events_{datetime.now(timezone.utc).isoformat()}"
+
+    logger.info(f"🌍 Saving {len(events)} world event(s) to {group_id}")
+
+    await graphiti.add_episode(
+        name=name,
+        episode_body=body,
+        source=EpisodeType.text,
+        source_description=f"dm:events:{lore_world}",
+        reference_time=datetime.now(timezone.utc),
+        group_id=group_id,
+        entity_types=ENTITY_TYPES,
+        edge_types=EDGE_TYPES,
+        edge_type_map=EDGE_TYPE_MAP,
+    )
+    logger.debug(f"🌍 World events persisted for campaign {campaign_id}")
+
+
+async def save_secret_notes(
+    notes: str,
+    campaign_id: int,
+    lore_world: str,
+) -> None:
+    """Persist DM secret knowledge to Graphiti (never loaded by NPCs)."""
+    if not notes or not notes.strip():
+        return
+
+    group_id = make_secrets_group_id(campaign_id)
+    name = f"dm_secret_{datetime.now(timezone.utc).isoformat()}"
+
+    logger.info(f"🤫 Saving DM secret notes to {group_id}")
+
+    await graphiti.add_episode(
+        name=name,
+        episode_body=notes,
+        source=EpisodeType.text,
+        source_description=f"dm:secrets:{lore_world}",
+        reference_time=datetime.now(timezone.utc),
+        group_id=group_id,
+        entity_types=ENTITY_TYPES,
+        edge_types=EDGE_TYPES,
+        edge_type_map=EDGE_TYPE_MAP,
+    )
+    logger.debug(f"🤫 Secret notes persisted for campaign {campaign_id}")
 
 
 async def load_lorebook( lorebook: dict, world_name: str, *, batch_size: int = 5) -> int:

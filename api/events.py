@@ -48,7 +48,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
             window = min(12, len(lc_messages))
             conversation.message_buffer = lc_messages[-window:]
 
-            graph = spawn_dungeon_master(conversation)
+            graph = spawn_dungeon_master(conversation, sio=sio, sid=sid)
 
             await sio.save_session(sid, {
                 "conversation": conversation,
@@ -96,7 +96,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
             return
         if graph is None:
             logger.warning(f"🔄 No graph found for sid={sid}, spawning new graph")
-            graph = spawn_dungeon_master(conversation)
+            graph = spawn_dungeon_master(conversation, sio=sio, sid=sid)
             await sio.save_session(sid, {
                 "conversation": conversation,
                 "graph": graph,
@@ -119,16 +119,31 @@ def register_events(sio: socketio.AsyncServer) -> None:
 
             pre_ai_count = sum(1 for m in conversation.messages if m.role == "ai")
 
-            handler = SocketStreamHandler(sio, sid, [c.name for c in conversation.characters])
+            character_list = [c.name for c in conversation.characters]
+            handler = SocketStreamHandler(sio, sid, character_list)
             await handler.process(stream)
 
-            if handler.message_ids:
+            npc_streamed_ids: list[str] = getattr(conversation, "_streamed_npc_ids", [])
+            all_stream_ids = handler.message_ids + npc_streamed_ids
+
+            if all_stream_ids:
                 new_ai_msgs = [m for m in conversation.messages if m.role == "ai"][pre_ai_count:]
                 id_map = [
                     {"oldId": stream_id, "newId": str(db_msg.id)}
-                    for stream_id, db_msg in zip(handler.message_ids, new_ai_msgs)
+                    for stream_id, db_msg in zip(all_stream_ids, new_ai_msgs)
                 ]
                 await sio.emit("messages_persisted", {"mapping": id_map}, to=sid)
+
+            conversation._streamed_npc_ids = []
+
+            if getattr(conversation, "_npcs_introduced", False):
+                conversation._npcs_introduced = False
+                graph = spawn_dungeon_master(conversation, sio=sio, sid=sid)
+                await sio.save_session(sid, {
+                    "conversation": conversation,
+                    "graph": graph,
+                })
+                logger.info(f"🔄 Graph rebuilt after NPC introduction for sid={sid}")
 
         except Exception:
             logger.exception(f"💥 Stream error for sid={sid}")
