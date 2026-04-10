@@ -11,3 +11,4 @@ wheels/
 .chainlit
 settings.yaml
 sandbox.ipynb
+.cursor/settings.json

@@ -57,6 +57,12 @@ npc_narration = ChatNanoGPT(
 #     max_retries=4,
 # )
 
+# npc_narration = ChatXAI(
+#     model="grok-4-1-fast-non-reasoning", 
+#     temperature=0.8, 
+#     max_retries=4,
+# )
+
 scene_change = ChatXAI(
     model="grok-4-1-fast", 
     temperature=0, 

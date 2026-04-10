@@ -89,19 +89,18 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
             return END
         if response.should_respond:
             logger.info(f"✅ {character.name} decided to respond")
-            # return ["lore_loader", "memories_loader"]
-            return ["memories_loader"]
+            return ["lore_loader", "memories_loader"]
         logger.info(f"🚫 {character.name} decided NOT to respond")
         return END
 
-    # async def lore_loader(state: NPCState) -> NPCState:
-    #     last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
-    #     lore = await load_information(
-    #         query=last_human_message.content,
-    #         group_ids=[make_group_id("lore", conversation.campaign.lore_world)],
-    #     )
+    async def lore_loader(state: NPCState) -> NPCState:
+        last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
+        lore = await load_information(
+            query=last_human_message.content,
+            group_ids=[make_group_id("lore", conversation.campaign.lore_world)],
+        )
 
-    #     return {'lore': lore, 'messages': []}
+        return {'lore': lore, 'messages': []}
 
     async def memories_loader(state: NPCState) -> NPCState:
         last_human_message = next(m for m in reversed(state.messages) if isinstance(m, HumanMessage))
@@ -109,7 +108,7 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
             query=last_human_message.content,
             group_ids=[
                 make_memory_group_id(conversation.campaign.id, character.name),
-                make_group_id("lore", conversation.campaign.lore_world),
+                # make_group_id("lore", conversation.campaign.lore_world),
             ],
             limit=20,
         )
@@ -166,15 +165,14 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
         return {'messages': [response]}
 
     graph = StateGraph(NPCState)
-    # graph.add_node("lore_loader", lore_loader)
+    graph.add_node("lore_loader", lore_loader)
     graph.add_node("memories_loader", memories_loader)
     graph.add_node("emotion_updater", emotion_updater)
     graph.add_node("planner", planner)
 
     graph.add_node("npc_narrator", npc_narrator)
     graph.add_conditional_edges(START, should_respond)
-    # graph.add_edge(["lore_loader", "memories_loader"], "emotion_updater")
-    graph.add_edge("memories_loader", "emotion_updater")
+    graph.add_edge(["lore_loader", "memories_loader"], "emotion_updater")
     graph.add_edge("emotion_updater", "planner")
 
     graph.add_edge("planner", "npc_narrator")
