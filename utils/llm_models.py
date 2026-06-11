@@ -3,14 +3,14 @@ from langchain_xai import ChatXAI
 from utils.nanogpt_integration import ChatNanoGPT
 
 npc_manager = ChatXAI(
-    model="grok-4-1-fast-reasoning", 
+    model="grok-4.3", 
     temperature=0.8, 
     max_retries=3,
 )
 
 
 npc_emotions = ChatXAI(
-    model="grok-4-1-fast-non-reasoning", 
+    model="grok-4.3", 
     temperature=0.3, 
     max_retries=4,
 )
@@ -27,13 +27,10 @@ npc_should_respond = ChatXAI(
 #     max_retries=4,
 # )
 
-npc_thoughts = ChatNanoGPT(
-    model="z-ai/glm-5v-turbo:thinking",
-    # model="Qwen3.5-27B-BlueStar-Derestricted",
-    temperature=0.7,
-    # extra_body={"min_p": 0.01},
-    max_retries=4,
-    frequency_penalty=0.4,
+npc_thoughts = ChatXAI(
+    model="grok-4.3",
+    temperature=0.8,
+    max_retries=3,
 )
 # npc_narration = ChatXAI(
 #     model="grok-4-1-fast-reasoning", 
@@ -41,27 +38,11 @@ npc_thoughts = ChatNanoGPT(
 #     max_retries=4,
 # )
 
-npc_narration = ChatNanoGPT(
-    model="z-ai/glm-5v-turbo",
-    # model="Llama-3.3-70B-Strawberrylemonade-v1.2",
+npc_narration = ChatXAI(
+    model="grok-4.3",
     temperature=0.8,
-    # extra_body={"min_p": 0.01},
-    presence_penalty=0.2,
-    max_retries=4,
+    max_retries=3,
 )
-
-# npc_narration = ChatNanoGPT(
-#     model="GLM-4.5-Air-Derestricted-Iceblink-v2", 
-#     temperature=0.7, 
-#     # presence_penalty=0.2,
-#     max_retries=4,
-# )
-
-# npc_narration = ChatXAI(
-#     model="grok-4-1-fast-non-reasoning", 
-#     temperature=0.8, 
-#     max_retries=4,
-# )
 
 scene_change = ChatXAI(
     model="grok-4-1-fast", 
@@ -71,8 +52,8 @@ scene_change = ChatXAI(
 )
 
 lore_creator = ChatXAI(
-    model="grok-4.20-beta-0309-reasoning",
-    temperature=0.8,
+    model="grok-4.3",
+    temperature=0.7,
     max_retries=3,
 )
 
@@ -84,26 +65,42 @@ lore_creator = ChatXAI(
 # )
 
 memory_filter = ChatXAI(
-    model="grok-4-1-fast-non-reasoning",
+    model="grok-4.3",
     temperature=0.1,
     max_retries=3,
 )
 
 npc_builder = ChatXAI(
-    model="grok-4-1-fast-reasoning",
-    temperature=0.8,
+    model="grok-4.3",
+    temperature=0.5,
     max_retries=3,
 )
+
+# dm_planner_model = ChatNanoGPT(
+#     model="z-ai/glm-5v-turbo:thinking",
+#     temperature=0.85,
+#     extra_body={"min_p": 0.01},
+#     frequency_penalty=0.4,
+#     max_retries=3,
+# )
 
 dm_planner_model = ChatXAI(
-    model="grok-4-1-fast-reasoning",
-    temperature=0.4,
+    model="grok-4.3",
+    temperature=0.75,
     max_retries=3,
 )
 
-dm_narrator_model = ChatNanoGPT(
-    model="z-ai/glm-5v-turbo",
-    temperature=0.85,
-    presence_penalty=0.3,
-    max_retries=4,
+dm_narrator_model = ChatXAI(
+    model="grok-4.3",
+    temperature=0.75,
+    max_retries=3,
 )
+
+# dm_narrator_model = ChatNanoGPT(
+#     # model="z-ai/glm-5v-turbo",
+#     model="Qwen3.5-27B-BlueStar-Derestricted",
+#     temperature=1,
+#     extra_body={"min_p": 0.01},
+#     frequency_penalty=0.4,
+#     max_retries=4,
+# )

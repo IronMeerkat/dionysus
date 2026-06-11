@@ -84,6 +84,8 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
     selectedCharacterIds.size > 0 &&
     !submitting;
 
+  console.log("canSubmit", canSubmit);
+
   const handleStart = useCallback(async () => {
     if (!canSubmit || selectedPlayerId === null || !campaignId) return;
     setSubmitting(true);

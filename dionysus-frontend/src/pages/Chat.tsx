@@ -75,8 +75,8 @@ const Chat = ({ sidebarOpen, onToggleSidebar }: ChatProps) => {
       appendToken(messageId, token);
     };
 
-    const handleStreamEnd = ({ messageId }: StreamEndPayload) => {
-      finalizeStream(messageId);
+    const handleStreamEnd = ({ messageId, content }: StreamEndPayload) => {
+      finalizeStream(messageId, content);
     };
 
     const handleMessagesPersisted = ({ mapping }: MessagesPersistedPayload) => {

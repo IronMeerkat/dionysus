@@ -14,6 +14,12 @@ export interface StreamTokenPayload {
 
 export interface StreamEndPayload {
   messageId: string;
+  /**
+   * Authoritative cleaned content from the server. When present it replaces
+   * whatever streamed in live (retry attempts, truncated turns); an empty
+   * string means the message was retracted and the bubble should be removed.
+   */
+  content?: string;
 }
 
 export interface SocketErrorPayload {

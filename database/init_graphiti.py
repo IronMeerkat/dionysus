@@ -15,7 +15,7 @@ logger = getLogger(__name__)
 
 XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 XAI_BASE_URL = "https://api.x.ai/v1"
-XAI_MODEL = "grok-4-1-fast-non-reasoning"
+XAI_MODEL = "grok-4.3"
 XAI_SMALL_MODEL = "grok-4-1-fast-non-reasoning"
 
 OLLAMA_EMBED_MODEL = "mxbai-embed-large"

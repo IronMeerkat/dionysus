@@ -142,6 +142,16 @@ class Conversation(Base):
                 f"🎭 Character '{character.name}' joined conversation {self.id}"
             )
 
+    # def remove_character(self, character: object) -> None:
+    #     """👋 Remove a character from this conversation's participants."""
+    #     if character in self.characters:
+    #         self.characters.remove(character)
+    #         session.add(self)
+    #         session.commit()
+    #         logger.info(
+    #             f"👋 Character '{character.name}' left conversation {self.id}"
+    #         )
+
     # ------------------------------------------------------------------
     # Message helpers
     # ------------------------------------------------------------------

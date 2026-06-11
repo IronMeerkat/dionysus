@@ -1,9 +1,10 @@
 from logging import getLogger
 from typing import Annotated
 import operator
+import re
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, HumanMessage, AnyMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, AnyMessage
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
@@ -29,6 +30,82 @@ class EmotionalState(BaseModel, metaclass=Oligaton):
     hope: int = Field(default=0, ge=-20, le=20, description="Intensity of positive expectation for outcomes.")
 
 
+def strip_speaker_prefix(raw: str, name: str) -> str:
+    """Remove any leading '{name}:' speaker labels (repeated, any casing) from narration."""
+    pattern = re.compile(
+        rf"^\s*\**\s*{re.escape(name)}\s*\**\s*:(?:\s*\*+(?=\s|$))?\s*",
+        re.IGNORECASE,
+    )
+    content = (raw or "").strip()
+    while (match := pattern.match(content)):
+        content = content[match.end():].strip()
+    return content
+
+
+def truncate_foreign_turns(content: str, other_speakers: list[str]) -> tuple[str, bool]:
+    """Cut narration at the first line that starts another participant's turn.
+
+    Catches the failure mode where the model 'completes the transcript' instead of
+    writing only its own turn — e.g. replaying the player's message as ``Ariel: ...``
+    or continuing into ``Narrator: ...`` after its own line.
+    """
+    if not other_speakers or not content:
+        return content, False
+    names = "|".join(re.escape(n) for n in other_speakers if n)
+    pattern = re.compile(rf"^\s*\**\s*(?:{names})\s*\**\s*:", re.IGNORECASE | re.MULTILINE)
+    match = pattern.search(content)
+    if match is None:
+        return content, False
+    return content[:match.start()].strip(), True
+
+
+async def narrate_with_retry(
+    prompt,
+    name: str,
+    other_speakers: list[str] | None = None,
+    max_attempts: int = 3,
+) -> tuple[AIMessage | None, str]:
+    """Invoke the narration model, retrying on empty, name-only, or ventriloquized replies.
+
+    The narrator prompt ends with a prefilled ``AIMessage("{name}: ")``; some models
+    occasionally continue it by just re-emitting the name and stopping, or by speaking
+    a turn for another participant (including the player). Foreign turns are truncated;
+    if nothing of the NPC's own remains, the call is retried with a corrective system
+    nudge inserted right before the prefill.
+    """
+    other_speakers = [*(other_speakers or []), "Narrator"]
+    messages = list(prompt.messages)
+    response = None
+    for attempt in range(1, max_attempts + 1):
+        response = await npc_narration.ainvoke(messages)
+        content = strip_speaker_prefix(response.content, name)
+        content, truncated = truncate_foreign_turns(content, other_speakers)
+        if truncated:
+            logger.warning(
+                f"🎭 {name} tried to speak for another participant; truncated their turn "
+                f"(attempt {attempt}/{max_attempts}): {response.content[:120]!r}"
+            )
+        if content:
+            if attempt > 1:
+                logger.info(f"🎭 {name} produced narration on attempt {attempt}")
+            return response, content
+        logger.warning(
+            f"🎭 {name} returned an empty/name-only/ventriloquized narration "
+            f"(attempt {attempt}/{max_attempts}): {response.content[:200]!r}"
+        )
+        nudge = SystemMessage(content=(
+            f"Your previous reply was invalid: it was empty, contained only a speaker "
+            f"label, or spoke a turn on behalf of another participant "
+            f"({', '.join(other_speakers)}). You must now write {name}'s OWN turn only: "
+            f"at least one full sentence of dialogue or *action*, fully in character as "
+            f"{name}. Never write a line that begins with another participant's name, "
+            f"and never repeat earlier messages from the conversation."
+        ))
+        messages = [*messages[:-1], nudge, messages[-1]]
+    logger.error(f"💀 {name} failed to produce narration after {max_attempts} attempts")
+    return response, ""
+
+
 def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGraph:
 
     other_characters = [f"**{c.name}**:\n{c.description}" 
@@ -36,6 +113,8 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
                         if c.id != character.id]
 
     other_characters = '\n\n\n'.join(other_characters)
+    other_speakers = [c.name for c in conversation.characters if c.id != character.id]
+    other_speakers.append(conversation.player.name)
 
     emotional_state_model = npc_emotions.with_structured_output(EmotionalState.model_json_schema(), strict=True)
 
@@ -64,6 +143,7 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
                 'description': character.description,
                 'other_characters': other_characters,
                 'player': conversation.player.description,
+                'player_name': conversation.player.name,
                 'location': conversation.location,
                 'story_background': conversation.story_background,
                 'messages': self.combined_messages,
@@ -150,15 +230,14 @@ def spawn_npc(character: CharacterModel, conversation: Conversation) -> StateGra
     async def npc_narrator(state: NPCState) -> NPCState:
 
         prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
-        prompt.messages.append(AIMessage(content=f"{character.name}:"))
+        prefix = f"{character.name}: "
+        prompt.messages.append(AIMessage(content=prefix))
 
-        response = await npc_narration.ainvoke(prompt)
-
-        content = response.content.strip()
-        prefix = f"{character.name}:"
-        if content.startswith(prefix):
-            content = content[len(prefix):].lstrip()
-        response.content = f"{character.name}: {content}"
+        response, content = await narrate_with_retry(prompt, character.name, other_speakers)
+        if not content:
+            logger.error(f"💀 {character.name} skipping turn: no usable narration produced")
+            return {'messages': []}
+        response.content = f"{prefix}{content}"
 
         response.name = character.name
         response.id = str(uuid4())
@@ -210,6 +289,8 @@ def spawn_npc_directed(
         if c.id != character.id
     ]
     other_characters_str = "\n\n\n".join(other_characters)
+    other_speakers = [c.name for c in conversation.characters if c.id != character.id]
+    other_speakers.append(conversation.player.name)
 
     emotional_state_model = npc_emotions.with_structured_output(
         EmotionalState.model_json_schema(), strict=True
@@ -247,6 +328,7 @@ def spawn_npc_directed(
                 "description": character.description + withheld_block,
                 "other_characters": other_characters_str,
                 "player": conversation.player.description,
+                "player_name": conversation.player.name,
                 "location": conversation.location,
                 "story_background": conversation.story_background,
                 "messages": self.combined_messages,
@@ -313,14 +395,12 @@ def spawn_npc_directed(
 
     async def npc_narrator(state: DirectedNPCState) -> DirectedNPCState:
         prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
-        prompt.messages.append(AIMessage(content=f"{character.name}:"))
+        prompt.messages.append(AIMessage(content=f"{character.name}: "))
 
-        response = await npc_narration.ainvoke(prompt)
-
-        content = response.content.strip()
-        prefix = f"{character.name}:"
-        if content.startswith(prefix):
-            content = content[len(prefix):].lstrip()
+        response, content = await narrate_with_retry(prompt, character.name, other_speakers)
+        if not content:
+            logger.error(f"💀 {character.name} skipping directed turn: no usable narration produced")
+            return {"messages": []}
         response.content = f"{character.name}: {content}"
 
         response.name = character.name

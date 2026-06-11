@@ -12,3 +12,4 @@ wheels/
 settings.yaml
 sandbox.ipynb
 .cursor/settings.json
+scripts/*

@@ -10,7 +10,7 @@ interface MessageStoreState {
   removeMessage: (messageId: string) => void;
   startStream: (messageId: string, name: string) => void;
   appendToken: (messageId: string, token: string) => void;
-  finalizeStream: (messageId: string) => void;
+  finalizeStream: (messageId: string, content?: string) => void;
 }
 
 const useMessageStore = create<MessageStoreState>((set) => ({
@@ -82,12 +82,20 @@ const useMessageStore = create<MessageStoreState>((set) => ({
       ),
     })),
 
-  finalizeStream: (messageId) =>
-    set((state) => ({
-      messages: state.messages.map((m) =>
-        m.id === messageId ? { ...m, streaming: false } : m,
-      ),
-    })),
+  finalizeStream: (messageId, content) =>
+    set((state) => {
+      if (content === "") {
+        // Server retracted the message (narration failed) — drop the bubble.
+        return { messages: state.messages.filter((m) => m.id !== messageId) };
+      }
+      return {
+        messages: state.messages.map((m) =>
+          m.id === messageId
+            ? { ...m, streaming: false, content: content ?? m.content }
+            : m,
+        ),
+      };
+    }),
 }));
 
 export { useMessageStore };

@@ -10,6 +10,7 @@ type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 export class SocketService {
   private socket: TypedSocket | null = null;
   private _onConnect: (() => void) | null = null;
+  private lastInitKey: string | null = null;
 
   get connected(): boolean {
     return this.socket?.connected ?? false;
@@ -37,6 +38,7 @@ export class SocketService {
 
     this.socket.on("connect", () => {
       console.log("🔌 SocketService: connected", this.socket?.id);
+      this.lastInitKey = null;
       this._onConnect?.();
     });
 
@@ -69,6 +71,12 @@ export class SocketService {
       console.error("❌ SocketService: cannot init session — not connected");
       return;
     }
+    const key = `${this.socket.id}:${conversationId}`;
+    if (key === this.lastInitKey) {
+      console.warn("⚡ SocketService: duplicate init_session skipped —", key);
+      return;
+    }
+    this.lastInitKey = key;
     this.socket.emit("init_session", { conversation_id: conversationId });
   }
 

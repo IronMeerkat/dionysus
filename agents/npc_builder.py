@@ -21,15 +21,16 @@ BUILDER_TOOLS = [search_lore, search_entities, create_character]
 class NPCBuilderState(BaseModel):
     messages: Annotated[list[AnyMessage], operator.add]
     world_name: str = ""
-    lore_context: str = ""
+    existing_lore_context: str = ""
 
 
 def spawn_npc_builder(world_name: str) -> StateGraph:
-    """Build a standalone NPC builder agent for a given world.
+    """Build a multi-turn NPC builder/editor agent for a given world.
 
-    The returned compiled graph accepts a HumanMessage with NPC design
-    instructions and produces a W++ character card, persisting the new
-    NPC to the database via the create_character tool.
+    The returned graph is invoked per-message with the accumulated
+    conversation history.  The agent converses about NPC design, asks
+    follow-ups, and persists finished characters to the database via the
+    create_character tool.
 
     Designed for dual invocation:
       - By another agent: ``await graph.ainvoke({"messages": [HumanMessage(content=...)]})``
@@ -51,21 +52,22 @@ def spawn_npc_builder(world_name: str) -> StateGraph:
         context = await load_information(
             query=last_human.content,
             group_ids=[group_id],
-            limit=20,
+            limit=50,
         )
         logger.info(f"🌍 Loaded {len(context.splitlines())} lore facts for world '{world_name}'")
         return {
             "messages": [],
             "world_name": world_name,
-            "lore_context": context,
+            "existing_lore_context": context,
         }
 
     async def builder_agent(state: NPCBuilderState) -> dict:
-        """🧠 LLM agent that designs an NPC in W++ format and persists
-        it using the create_character tool."""
+        """🧠 LLM agent that converses about NPC design, asks follow-ups,
+        and persists finished characters via the create_character tool."""
         prompt = await npc_builder_prompt_template.ainvoke({
             "messages": state.messages,
-            "lore_context": state.lore_context,
+            "world_name": state.world_name,
+            "existing_lore_context": state.existing_lore_context,
         })
 
         model = npc_builder.bind_tools(BUILDER_TOOLS)
@@ -99,20 +101,3 @@ def spawn_npc_builder(world_name: str) -> StateGraph:
     graph.add_edge("tools", "builder_agent")
 
     return graph.compile(name="npc_builder")
-
-
-async def build_npc(world_name: str, instructions: str) -> str:
-    """Convenience wrapper for programmatic NPC creation.
-
-    Spawns the builder graph, invokes it with the given instructions,
-    and returns the final AI message content (the NPC summary).
-    """
-    graph = spawn_npc_builder(world_name)
-    result = await graph.ainvoke({
-        "messages": [HumanMessage(content=instructions)],
-    })
-    ai_messages = [m for m in result["messages"] if isinstance(m, AIMessage) and m.content]
-    if not ai_messages:
-        logger.error("🚫 NPC builder produced no AI response")
-        return ""
-    return ai_messages[-1].content

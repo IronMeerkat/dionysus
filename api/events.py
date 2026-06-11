@@ -5,7 +5,7 @@ import socketio
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from agents.dungeon_master import spawn_dungeon_master
+from agents.dungeon_master import NARRATOR_NAME, spawn_dungeon_master
 from api.stream_handler import SocketStreamHandler
 from database.models.conversation import Conversation
 from database.postgres_connection import session as db_session
@@ -107,7 +107,9 @@ def register_events(sio: socketio.AsyncServer) -> None:
         logger.info(f"🪪 message_created emitted: id={msg_id}")
 
 
-        config = RunnableConfig(callbacks=[langfuse_callback_handler])
+        # NPC build negotiation loops add several super-steps per introduced
+        # NPC, so the default recursion limit of 25 is too tight.
+        config = RunnableConfig(callbacks=[langfuse_callback_handler], recursion_limit=80)
 
         try:
             stream = graph.astream(
@@ -123,18 +125,17 @@ def register_events(sio: socketio.AsyncServer) -> None:
             handler = SocketStreamHandler(sio, sid, character_list)
             await handler.process(stream)
 
-            npc_streamed_ids: list[str] = getattr(conversation, "_streamed_npc_ids", [])
-            all_stream_ids = handler.message_ids + npc_streamed_ids
-
-            if all_stream_ids:
+            # NPC bubbles already stream with the same UUID that gets persisted,
+            # so only DM narrator messages need their ids remapped.
+            if handler.message_ids:
                 new_ai_msgs = [m for m in conversation.messages if m.role == "ai"][pre_ai_count:]
+                narrator_msgs = [m for m in new_ai_msgs if m.speaker_name == NARRATOR_NAME]
                 id_map = [
                     {"oldId": stream_id, "newId": str(db_msg.id)}
-                    for stream_id, db_msg in zip(all_stream_ids, new_ai_msgs)
+                    for stream_id, db_msg in zip(handler.message_ids, narrator_msgs)
                 ]
-                await sio.emit("messages_persisted", {"mapping": id_map}, to=sid)
-
-            conversation._streamed_npc_ids = []
+                if id_map:
+                    await sio.emit("messages_persisted", {"mapping": id_map}, to=sid)
 
             if getattr(conversation, "_npcs_introduced", False):
                 conversation._npcs_introduced = False

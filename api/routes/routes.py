@@ -67,8 +67,18 @@ def edit_message(message_id: UUID = Path(...), content: str = Body(..., embed=Tr
     message = session.query(Message).filter(Message.id == message_id).first()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
+    conversation = message.conversation
     message.content = content
     session.commit()
+
+    # The socket session holds the same identity-mapped Conversation object;
+    # its transient message_buffer must mirror the DB or agents keep seeing
+    # the old content.
+    for buffered in getattr(conversation, "message_buffer", []):
+        if str(buffered.id) == str(message_id):
+            buffered.content = content
+            logger.info(f"🧹 Patched message {message_id} in buffer of conversation {conversation.id}")
+
     logger.info(f"📝 Message {message_id} edited")
     return {"message": "Message edited"}
 
@@ -78,7 +88,15 @@ def delete_message(message_id: UUID = Path(...)) -> dict[str, str]:
     message = session.query(Message).filter(Message.id == message_id).first()
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
+    conversation = message.conversation
     session.delete(message)
     session.commit()
+
+    buffer = getattr(conversation, "message_buffer", [])
+    pruned = [m for m in buffer if str(m.id) != str(message_id)]
+    if len(pruned) != len(buffer):
+        conversation.message_buffer = pruned
+        logger.info(f"🧹 Pruned message {message_id} from buffer of conversation {conversation.id}")
+
     logger.info(f"📝 Message {message_id} deleted")
     return {"message": "Message deleted"}
