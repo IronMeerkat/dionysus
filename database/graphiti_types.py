@@ -6,7 +6,6 @@ invalidation means "Orion is in the Zenith Chamber" gets superseded when a
 later episode says "Orion is aboard the warship" -- no manual bookkeeping.
 """
 
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -87,7 +86,10 @@ class Event(BaseModel):
 
     event_type: Optional[str] = Field(None, description="Category (e.g. battle, political shift, founding, betrayal, discovery)")
     significance: Optional[str] = Field(None, description="Impact level (e.g. minor, major, world-altering)")
-    occurred_at: Optional[datetime] = Field(None, description="When the event took place in-world")
+    # Narrative time, NOT a datetime: in-world calendars ("Day 3, dusk", "412 AE")
+    # produce un-parseable timestamps that crash Graphiti's attribute extraction.
+    occurred_at: Optional[str] = Field(None, description=(
+        "When the event took place in-world, as narrative time (e.g. 'Day 3, dusk', 'the year 412 AE')"))
 
 
 # ---------------------------------------------------------------------------

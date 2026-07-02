@@ -7,6 +7,7 @@ from fastapi.exceptions import HTTPException
 from database.models import Character, Player, Message
 from database.models.conversation import Conversation
 from database.postgres_connection import session
+from tools.world_state import ensure_world_state, get_world_state
 
 logger = logging.getLogger(__name__)
 
@@ -35,30 +36,33 @@ def _get_conversation(conversation_id: int) -> Conversation:
 @router.get('/conversations/{conversation_id}/story_background')
 def get_story_background(conversation_id: int) -> dict[str, str]:
     conversation = _get_conversation(conversation_id)
-    return {"story_background": conversation.story_background or ""}
+    return {"story_background": conversation.campaign.story_background or ""}
 
 
 @router.put("/conversations/{conversation_id}/story_background", status_code=200)
 def update_story_background(conversation_id: int, story_background: str = Body(..., embed=True)) -> dict[str, str]:
     conversation = _get_conversation(conversation_id)
-    conversation.story_background = story_background
+    campaign = conversation.campaign
+    campaign.story_background = story_background
     session.commit()
-    logger.info(f"📜 Story background saved to conversation {conversation.id}")
+    logger.info(f"📜 Story background saved to campaign {campaign.id}")
     return {"message": "Story background updated"}
 
 
 @router.get('/conversations/{conversation_id}/location')
 def get_location(conversation_id: int) -> dict[str, str]:
     conversation = _get_conversation(conversation_id)
-    return {"location": conversation.location or ""}
+    world_state = get_world_state(conversation.campaign.id)
+    return {"location": (world_state.location if world_state else "") or ""}
 
 
 @router.put("/conversations/{conversation_id}/location", status_code=200)
 def update_location(conversation_id: int, location: str = Body(..., embed=True)) -> dict[str, str]:
     conversation = _get_conversation(conversation_id)
-    conversation.location = location
+    world_state = ensure_world_state(conversation.campaign.id)
+    world_state.location = location
     session.commit()
-    logger.info(f"📍 Location saved to conversation {conversation.id}")
+    logger.info(f"📍 Location saved to campaign {conversation.campaign.id}")
     return {"message": "Location updated"}
 
 

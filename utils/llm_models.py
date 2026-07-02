@@ -1,61 +1,23 @@
 from langchain_xai import ChatXAI
 
+from hephaestus.settings import settings
+
 from utils.nanogpt_integration import ChatNanoGPT
 
-npc_manager = ChatXAI(
-    model="grok-4.3", 
-    temperature=0.8, 
-    max_retries=3,
-)
+models = settings.models
 
+xai = models.xai.model_dump()
+xai_small = models.xai_small.model_dump()
+nanogpt = models.nanogpt.model_dump()
 
-npc_emotions = ChatXAI(
-    model="grok-4.3", 
-    temperature=0.3, 
-    max_retries=4,
-)
+npc_emotions = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
+npc_thoughts = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"}, max_tokens=2400)
+npc_narration = ChatNanoGPT(**nanogpt)
+# npc_narration = ChatXAI(**models.xai)
 
-npc_should_respond = ChatXAI(
-    model="grok-4-1-fast-non-reasoning", 
-    temperature=0.0, 
-    max_retries=4,
-)
-# npc_thoughts = ChatXAI(
-#     model="grok-4.20-beta-0309-reasoning", 
-#     temperature=0.8, 
-#     max_tokens=1024, 
-#     max_retries=4,
-# )
+scene_change = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, max_tokens=128)
 
-npc_thoughts = ChatXAI(
-    model="grok-4.3",
-    temperature=0.8,
-    max_retries=3,
-)
-# npc_narration = ChatXAI(
-#     model="grok-4-1-fast-reasoning", 
-#     top_p=1, 
-#     max_retries=4,
-# )
-
-npc_narration = ChatXAI(
-    model="grok-4.3",
-    temperature=0.8,
-    max_retries=3,
-)
-
-scene_change = ChatXAI(
-    model="grok-4-1-fast", 
-    temperature=0, 
-    max_tokens=128, 
-    max_retries=3,
-)
-
-lore_creator = ChatXAI(
-    model="grok-4.3",
-    temperature=0.7,
-    max_retries=3,
-)
+lore_creator = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
 
 # lore_creator = ChatNanoGPT(
 #     model="Qwen3.5-27B-BlueStar-Derestricted",
@@ -64,43 +26,26 @@ lore_creator = ChatXAI(
 #     max_retries=4,
 # )
 
-memory_filter = ChatXAI(
-    model="grok-4.3",
-    temperature=0.1,
-    max_retries=3,
-)
+memory_filter = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
 
-npc_builder = ChatXAI(
-    model="grok-4.3",
-    temperature=0.5,
-    max_retries=3,
-)
+npc_builder = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
 
-# dm_planner_model = ChatNanoGPT(
-#     model="z-ai/glm-5v-turbo:thinking",
-#     temperature=0.85,
-#     extra_body={"min_p": 0.01},
-#     frequency_penalty=0.4,
-#     max_retries=3,
-# )
+# --- Campaign Admin (out-of-character campaign configuration chat) ---
+campaign_admin = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
 
-dm_planner_model = ChatXAI(
-    model="grok-4.3",
-    temperature=0.75,
-    max_retries=3,
-)
 
-dm_narrator_model = ChatXAI(
-    model="grok-4.3",
-    temperature=0.75,
-    max_retries=3,
-)
+dm_planner_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"}, max_tokens=2400)
 
-# dm_narrator_model = ChatNanoGPT(
-#     # model="z-ai/glm-5v-turbo",
-#     model="Qwen3.5-27B-BlueStar-Derestricted",
-#     temperature=1,
-#     extra_body={"min_p": 0.01},
-#     frequency_penalty=0.4,
-#     max_retries=4,
-# )
+# dm_narrator_model = ChatXAI(**models.xai)
+
+dm_narrator_model = ChatNanoGPT(**nanogpt)
+
+# --- DM supervisor subagents ------------------------------------------------
+# Fast non-reasoning model for cheap classification/validation hops.
+dm_intent_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai_small)
+dm_continuity_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai_small)
+
+dm_referee_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
+dm_ooc_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
+dm_summarizer_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
+dm_faction_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})

@@ -3,9 +3,10 @@ import logging
 from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
 
-from database.models import Campaign, Conversation
+from database.models import Campaign, Conversation, WorldState
 from database.postgres_connection import session
 from database.graphiti_utils import wipe_campaign_memories
+from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,10 @@ def create_campaign(
     if existing:
         raise HTTPException(status_code=409, detail=f"Campaign '{name}' already exists")
 
-    campaign = Campaign(name=name, lore_world=lore_world)
+    campaign = Campaign(name=name, lore_world=lore_world, story_background=placeholder_scenario)
+    # Seed the 1:1 world state with a placeholder scene location; narrative
+    # time starts empty and advances during play.
+    campaign.world_state = WorldState(location=placeholder_location)
     session.add(campaign)
     session.commit()
     logger.info(f"🏰 Created campaign '{name}' with lore_world='{lore_world}'")

@@ -4,7 +4,7 @@ import socketio
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage, ToolMessageChunk
 from langchain_core.runnables import RunnableConfig
 
-from agents.npc_builder import spawn_npc_builder
+from agents.tool_agent import spawn_npc_builder
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def register_npc_builder_events(sio: socketio.AsyncServer) -> None:
                 namespace_tuple, (msg, metadata) = item
                 langgraph_node = metadata.get("langgraph_node", "")
 
-                if isinstance(msg, AIMessageChunk) and langgraph_node == "builder_agent":
+                if isinstance(msg, AIMessageChunk) and langgraph_node == "agent":
                     if msg.content:
                         token = str(msg.content)
                         collected_text += token

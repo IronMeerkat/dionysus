@@ -8,6 +8,10 @@
   @apply mb-8 flex items-start justify-between gap-4;
 }
 
+.campaign-detail-header-actions {
+  @apply flex flex-shrink-0 items-center gap-2;
+}
+
 .campaign-detail-name {
   @apply mb-2 text-2xl font-bold text-base-content;
 }

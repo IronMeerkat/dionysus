@@ -9,6 +9,7 @@ from graphiti_core.nodes import EpisodeType
 
 from database.init_graphiti import graphiti
 from database.graphiti_types import ENTITY_TYPES, EDGE_TYPES, EDGE_TYPE_MAP
+from hephaestus.settings import settings
 from utils.llm_models import memory_filter
 from utils.prompts import memory_significance_prompt
 
@@ -17,6 +18,8 @@ logger = getLogger(__name__)
 NOTHING_MARKER = "NOTHING"
 
 GROUP_SEP = "--"
+
+s = settings.graphiti
 
 
 def make_group_id(category: str, name: str) -> str:
@@ -43,10 +46,15 @@ def make_secrets_group_id(campaign_id: int) -> str:
     return make_group_id("dm_secrets", f"campaign_{campaign_id}")
 
 
+def make_player_prefs_group_id(campaign_id: int) -> str:
+    """Build a group_id for learned player preferences tied to a campaign."""
+    return make_group_id("player_prefs", f"campaign_{campaign_id}")
+
+
 async def load_information(
     query: str,
     group_ids: list[str] | None = None,
-    limit: int = 10,
+    limit: int = s.information_limits.default,
     node_labels: list[str] | None = None,
     edge_types: list[str] | None = None,
 ) -> str:
@@ -245,6 +253,34 @@ async def save_secret_notes(
         edge_type_map=EDGE_TYPE_MAP,
     )
     logger.debug(f"🤫 Secret notes persisted for campaign {campaign_id}")
+
+
+async def save_player_preferences(
+    notes: str,
+    campaign_id: int,
+    lore_world: str,
+) -> None:
+    """Persist learned player preferences to Graphiti (DM pacing/tone signal)."""
+    if not notes or not notes.strip():
+        return
+
+    group_id = make_player_prefs_group_id(campaign_id)
+    name = f"player_prefs_{datetime.now(timezone.utc).isoformat()}"
+
+    logger.info(f"🎯 Saving player preference notes to {group_id}")
+
+    await graphiti.add_episode(
+        name=name,
+        episode_body=notes,
+        source=EpisodeType.text,
+        source_description=f"dm:player_prefs:{lore_world}",
+        reference_time=datetime.now(timezone.utc),
+        group_id=group_id,
+        entity_types=ENTITY_TYPES,
+        edge_types=EDGE_TYPES,
+        edge_type_map=EDGE_TYPE_MAP,
+    )
+    logger.debug(f"🎯 Player preferences persisted for campaign {campaign_id}")
 
 
 async def load_lorebook( lorebook: dict, world_name: str, *, batch_size: int = 5) -> int:

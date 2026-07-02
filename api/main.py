@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.events import register_events
 from api.lore_events import register_lore_events
 from api.npc_builder_events import register_npc_builder_events
+from api.campaign_admin_events import register_campaign_admin_events
 from api.routes.routes import router
 from api.routes.session import session_router
 from api.routes.conversations import conversations_router
@@ -56,6 +57,7 @@ app.include_router(router)
 register_events(sio)
 register_lore_events(sio)
 register_npc_builder_events(sio)
+register_campaign_admin_events(sio)
 app.include_router(session_router)
 app.include_router(conversations_router)
 app.include_router(lore_router)

@@ -20,13 +20,16 @@ NODE_USE_TOOLS = "use_tools"
 NODE_NARRATOR = "npc_narrator"
 NODE_DM_NARRATOR_OPENING = "dm_narrator_opening"
 NODE_DM_NARRATOR_CLOSING = "dm_narrator_closing"
+NODE_OOC_RESPONDER = "ooc_responder"
 
 STREAMABLE_NODES = frozenset({
     NODE_DM_NARRATOR_OPENING,
     NODE_DM_NARRATOR_CLOSING,
+    NODE_OOC_RESPONDER,
 })
 
-DM_NARRATOR_NODES = frozenset({NODE_DM_NARRATOR_OPENING, NODE_DM_NARRATOR_CLOSING})
+# Nodes that speak with the Narrator voice (speaker attribution + no prefix stripping).
+DM_NARRATOR_NODES = frozenset({NODE_DM_NARRATOR_OPENING, NODE_DM_NARRATOR_CLOSING, NODE_OOC_RESPONDER})
 
 SKIP_NODES = frozenset({NODE_PLANNER, NODE_USE_TOOLS})
 

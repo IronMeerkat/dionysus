@@ -5,7 +5,6 @@ from fastapi.exceptions import HTTPException
 
 from database.models import Campaign, Character, Player, Conversation
 from database.postgres_connection import session
-from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +65,6 @@ def setup_session(
         player=player,
         characters=characters,
         campaign_id=campaign_id,
-        location=placeholder_location,
-        story_background=placeholder_scenario,
     )
     logger.info(f"🎮 Created conversation {conversation.id} for player={player.name}")
     return _conversation_response(conversation)

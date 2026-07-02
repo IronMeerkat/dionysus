@@ -11,28 +11,25 @@ from graphiti_core.embedder.client import EmbedderClient, EmbedderConfig
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from hephaestus.settings import settings
 
-logger = getLogger(__name__)
+s = settings.graphiti
 
 XAI_API_KEY = os.environ.get("XAI_API_KEY", "")
 XAI_BASE_URL = "https://api.x.ai/v1"
 XAI_MODEL = "grok-4.3"
 XAI_SMALL_MODEL = "grok-4-1-fast-non-reasoning"
 
-OLLAMA_EMBED_MODEL = "mxbai-embed-large"
-OLLAMA_EMBED_DIM = 1024
-OLLAMA_NUM_GPU = 99
+logger = getLogger(__name__)
+
 
 
 class OllamaEmbedder(EmbedderClient):
     """Graphiti embedder backed by Ollama's native API (GPU-accelerated)."""
 
-    def __init__(self, model: str = OLLAMA_EMBED_MODEL, num_gpu: int = OLLAMA_NUM_GPU):
-        self.config = EmbedderConfig(embedding_dim=OLLAMA_EMBED_DIM)
-        self._client = OllamaEmbeddings(model=model, num_gpu=num_gpu)
+    def __init__(self):
+        self.config = EmbedderConfig(embedding_dim=s.embed_dim)
+        self._client = OllamaEmbeddings(model=s.embed_model, num_gpu=s.num_gpu)
 
-    async def create(
-        self, input_data: str | list[str] | Iterable[int] | Iterable[Iterable[int]]
-    ) -> list[float]:
+    async def create(self, input_data: str | list[str] | Iterable[int] | Iterable[Iterable[int]]) -> list[float]:
         if isinstance(input_data, str):
             return await self._client.aembed_query(input_data)
         if isinstance(input_data, list) and input_data and isinstance(input_data[0], str):
@@ -55,13 +52,7 @@ llm_client = OpenAIGenericClient(config=llm_config)
 
 embedder = OllamaEmbedder()
 
-cross_encoder = OpenAIRerankerClient(
-    config=LLMConfig(
-        api_key=XAI_API_KEY,
-        base_url=XAI_BASE_URL,
-        model=XAI_SMALL_MODEL,
-    )
-)
+cross_encoder = OpenAIRerankerClient(config=llm_config)
 
 graphiti = Graphiti(
     uri=settings.NEO4J.NEO4J_URI,

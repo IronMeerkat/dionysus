@@ -112,3 +112,26 @@ export interface NPCBuilderClientToServerEvents {
   init_npc_builder: (payload: { world_name: string }) => void;
   npc_builder_message: (payload: { content: string }) => void;
 }
+
+// ---- Campaign Admin namespace (/campaign-admin) ----
+
+export interface CampaignAdminTokenPayload {
+  token: string;
+}
+
+export interface CampaignAdminUpdatedPayload {
+  summary: string;
+}
+
+export interface CampaignAdminServerToClientEvents {
+  campaign_admin_session_ready: (payload: { campaign_id: number }) => void;
+  campaign_admin_token: (payload: CampaignAdminTokenPayload) => void;
+  campaign_admin_updated: (payload: CampaignAdminUpdatedPayload) => void;
+  campaign_admin_done: () => void;
+  error: (payload: SocketErrorPayload) => void;
+}
+
+export interface CampaignAdminClientToServerEvents {
+  init_campaign_admin_session: (payload: { campaign_id: number }) => void;
+  campaign_admin_message: (payload: { content: string }) => void;
+}

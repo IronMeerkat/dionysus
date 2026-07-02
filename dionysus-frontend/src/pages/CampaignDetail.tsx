@@ -116,14 +116,25 @@ const CampaignDetail = () => {
           <h2 className="campaign-detail-name">{campaign.name}</h2>
           <span className="campaign-detail-lore">{campaign.lore_world}</span>
         </div>
-        <button
-          type="button"
-          className="btn btn-error btn-outline btn-sm campaign-delete-btn"
-          disabled={deleting}
-          onClick={handleDeleteCampaign}
-        >
-          {deleting ? "Deleting..." : "Delete Campaign"}
-        </button>
+        <div className="campaign-detail-header-actions">
+          <button
+            type="button"
+            className="btn btn-primary btn-outline btn-sm"
+            onClick={() =>
+              navigate(`/campaign-admin?campaign_id=${campaign.id}`)
+            }
+          >
+            Campaign Admin
+          </button>
+          <button
+            type="button"
+            className="btn btn-error btn-outline btn-sm campaign-delete-btn"
+            disabled={deleting}
+            onClick={handleDeleteCampaign}
+          >
+            {deleting ? "Deleting..." : "Delete Campaign"}
+          </button>
+        </div>
       </div>
 
       {error && <div className="campaign-detail-error">{error}</div>}

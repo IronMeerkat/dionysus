@@ -4,7 +4,7 @@ import socketio
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage, ToolMessageChunk
 from langchain_core.runnables import RunnableConfig
 
-from agents.lore_creator import spawn_lore_creator
+from agents.tool_agent import spawn_lore_creator
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def register_lore_events(sio: socketio.AsyncServer) -> None:
                 namespace_tuple, (msg, metadata) = item
                 langgraph_node = metadata.get("langgraph_node", "")
 
-                if isinstance(msg, AIMessageChunk) and langgraph_node == "lore_agent":
+                if isinstance(msg, AIMessageChunk) and langgraph_node == "agent":
                     if msg.content:
                         token = str(msg.content)
                         collected_text += token

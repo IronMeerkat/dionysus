@@ -6,7 +6,6 @@ from database.graphiti_utils import wipe_agent_memories as _graphiti_wipe, make_
 from database.postgres_connection import session
 from database.models import Player, Character, Conversation
 from hephaestus.langfuse_handler import langfuse_callback_handler
-from utils.prompts import placeholder_location, placeholder_scenario
 
 from agents.dungeon_master import spawn_dungeon_master
 from langchain_core.messages import HumanMessage
@@ -33,8 +32,6 @@ class EasySession:
             player=player_obj,
             characters=character_objs,
             campaign_id=campaign_id,
-            location=placeholder_location,
-            story_background=placeholder_scenario,
         )
         self.graph = spawn_dungeon_master(self.conversation)
         self._messages: list = []

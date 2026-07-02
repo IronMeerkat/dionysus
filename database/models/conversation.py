@@ -107,8 +107,6 @@ class Conversation(Base):
     updated_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=False, index=True)
-    location = Column(String, default='')
-    story_background = Column(Text, default='')
 
     # --- relationships ---------------------------------------------------
 
@@ -199,9 +197,13 @@ class Conversation(Base):
 
 
     @classmethod
-    def create(cls, player: Player, characters: list[Character], campaign_id: int, location: str = '', story_background: str = '') -> "Conversation":
-        """🎭 Create a new conversation between a player and one or more characters."""
-        conversation = cls(player=player, location=location, story_background=story_background, campaign_id=campaign_id)
+    def create(cls, player: Player, characters: list[Character], campaign_id: int) -> "Conversation":
+        """🎭 Create a new conversation between a player and one or more characters.
+
+        Scene location, story background, and narrative time are owned by the
+        campaign / its world state, not the conversation, so they are not set here.
+        """
+        conversation = cls(player=player, campaign_id=campaign_id)
 
         for character in characters:
             conversation.add_character(character)

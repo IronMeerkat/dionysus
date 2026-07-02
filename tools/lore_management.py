@@ -8,7 +8,16 @@ from database.graphiti_utils import load_information, make_group_id
 from database.graphiti_types import ENTITY_TYPES
 from database.graphiti_worlds import create_entry, delete_entry, get_entry, lore_group_id
 
+from hephaestus.settings import settings
+
+info_limits = settings.graphiti.information_limits
+
 logger = getLogger(__name__)
+
+# Max entries saved concurrently by bulk_save_lore_entries. Each save triggers
+# a graphiti add_episode (LLM extraction + Neo4j writes), so this caps how many
+# run in flight at once.
+BULK_SAVE_CONCURRENCY = 20
 
 
 class LoreEntryInput(BaseModel):
@@ -27,7 +36,7 @@ async def search_lore(query: str, world_name: str) -> str:
     results = await load_information(
         query=query,
         group_ids=[group_id],
-        limit=15,
+        limit=info_limits.lore,
     )
     if not results:
         return f"🔍 No lore found for query '{query}' in world '{world_name}'."
@@ -50,7 +59,7 @@ async def search_entities(query: str, world_name: str, entity_type: str) -> str:
         query=query,
         group_ids=[group_id],
         node_labels=[entity_type],
-        limit=15,
+        limit=info_limits.lore,
     )
     if not results:
         return f"🔍 No {entity_type} entities found for query '{query}' in world '{world_name}'."
@@ -94,24 +103,34 @@ async def bulk_save_lore_entries(entries: list[LoreEntryInput], world_name: str)
         return "❌ No entries to save: all content was empty."
 
     async def _save_all() -> None:
-        succeeded = 0
-        failed = 0
-        for entry in valid:
-            try:
-                gid = lore_group_id(world_name)
-                result = await create_entry(gid, entry.title, entry.content.strip(), source_description=f"lore_creator:{world_name}")
-                logger.info(
-                    f"📜 Bulk-saved '{entry.title}' (uuid={result['uuid']}) "
-                    f"to world '{world_name}'"
-                )
-                succeeded += 1
-            except Exception:
-                logger.exception(f"❌ Bulk-save failed for '{entry.title}'")
-                failed += 1
+        sem = asyncio.Semaphore(BULK_SAVE_CONCURRENCY)
 
+        async def _save_one(entry: LoreEntryInput) -> bool:
+            async with sem:
+                try:
+                    gid = lore_group_id(world_name)
+                    result = await create_entry(
+                        gid,
+                        entry.title,
+                        entry.content.strip(),
+                        source_description=f"lore_creator:{world_name}",
+                    )
+                    logger.info(
+                        f"📜 Bulk-saved '{entry.title}' (uuid={result['uuid']}) "
+                        f"to world '{world_name}'"
+                    )
+                    return True
+                except Exception:
+                    logger.exception(f"❌ Bulk-save failed for '{entry.title}'")
+                    return False
+
+        results = await asyncio.gather(*[_save_one(e) for e in valid])
+        succeeded = sum(1 for r in results if r)
+        failed = len(results) - succeeded
         logger.info(
             f"📦 Bulk save complete for world '{world_name}': "
-            f"{succeeded} succeeded, {failed} failed out of {len(valid)}"
+            f"{succeeded} succeeded, {failed} failed out of {len(valid)} "
+            f"(concurrency={BULK_SAVE_CONCURRENCY})"
         )
 
     asyncio.create_task(_save_all())
