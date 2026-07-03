@@ -6,7 +6,14 @@ from pydantic import BaseModel, Field
 
 from database.graphiti_utils import load_information, make_group_id
 from database.graphiti_types import ENTITY_TYPES
-from database.graphiti_worlds import create_entry, delete_entry, get_entry, lore_group_id
+from database.graphiti_worlds import (
+    create_entry,
+    delete_entry,
+    get_entry,
+    list_entries,
+    lore_group_id,
+    update_entry,
+)
 
 from hephaestus.settings import settings
 
@@ -141,6 +148,79 @@ async def bulk_save_lore_entries(entries: list[LoreEntryInput], world_name: str)
         f"'{world_name}': {titles}. They will be ingested into the knowledge "
         "graph shortly."
     )
+
+
+@tool
+async def list_lore_entries(world_name: str) -> str:
+    """List all lore entries stored in a world's knowledge graph.
+
+    Returns each entry's UUID, title, and creation time, one per line. Use
+    this to discover the UUIDs you need to modify or delete an entry. To see
+    the full content of a single entry, use search_lore with the entry's
+    title as the query.
+    """
+    gid = lore_group_id(world_name)
+    entries = await list_entries(gid)
+    if not entries:
+        return f"🔍 No lore entries found in world '{world_name}'."
+    lines = [
+        f"- uuid={e['uuid']} | title='{e['title']}' | created_at={e['created_at']}"
+        for e in entries
+    ]
+    logger.info(f"📋 Listed {len(entries)} lore entries in world '{world_name}'")
+    return "\n".join(lines)
+
+
+@tool
+async def update_lore_entry(
+    episode_uuid: str,
+    world_name: str,
+    title: str | None = None,
+    content: str | None = None,
+) -> str:
+    """Modify an existing lore entry's title and/or content.
+
+    Provide only the field(s) you want to change; the other is preserved.
+    Updating re-creates the entry (Graphiti assigns a new UUID), so
+    subsequent references should use the UUID returned here.
+
+    Verifies the entry belongs to the named world before updating.
+    """
+    try:
+        existing = await get_entry(episode_uuid)
+        if existing is None:
+            return f"❌ No lore entry found with uuid={episode_uuid}."
+
+        expected_gid = lore_group_id(world_name)
+        if existing["group_id"] != expected_gid:
+            return (
+                f"❌ Entry {episode_uuid} does not belong to world '{world_name}'."
+            )
+
+        if title is None and content is None:
+            return "❌ Nothing to update: provide a new title and/or content."
+
+        if content is not None:
+            content = content.strip()
+            if not content:
+                return "❌ Failed to update lore entry: content is empty."
+
+        updated = await update_entry(episode_uuid, title=title, content=content)
+        if updated is None:
+            return f"❌ Failed to update entry {episode_uuid}."
+
+        logger.info(
+            f"✏️ Updated lore entry in world '{world_name}': "
+            f"'{existing['title']}' (uuid={episode_uuid}) -> "
+            f"'{updated['title']}' (uuid={updated['uuid']})"
+        )
+        return (
+            f"✅ Updated '{updated['title']}' (new uuid={updated['uuid']}) "
+            f"in world '{world_name}'. The old uuid={episode_uuid} no longer exists."
+        )
+    except Exception as e:
+        logger.exception(f"❌ Failed to update lore entry {episode_uuid}")
+        return f"❌ Failed to update lore entry: {e}"
 
 
 @tool

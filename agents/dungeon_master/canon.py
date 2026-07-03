@@ -1,4 +1,5 @@
 """Canon manager: the narrator decorates, but THIS decides what became true."""
+import asyncio
 from logging import getLogger
 from uuid import UUID, uuid4
 
@@ -35,37 +36,51 @@ def make_canon_manager(ctx: DMContext):
                 lore_world=ctx.campaign.lore_world,
             ))
         if plan.time_location_update:
-            set_location(ctx.campaign.id, plan.time_location_update)
+            await asyncio.to_thread(set_location, ctx.campaign.id, plan.time_location_update)
         if plan.world_clock_update:
-            set_world_clock(ctx.campaign.id, plan.world_clock_update)
+            await asyncio.to_thread(set_world_clock, ctx.campaign.id, plan.world_clock_update)
 
-        for update in plan.thread_updates:
-            try:
-                apply_thread_update(ctx.campaign.id, update.title, update.action, update.note)
-            except Exception:
-                logger.exception(f"💥 Failed to apply thread update '{update.title}' ({update.action})")
-        for advance in plan.clock_advances:
-            try:
-                advance_faction_clock(
-                    ctx.campaign.id, advance.faction, advance.ticks,
-                    reason=advance.reason, next_move=advance.next_move,
-                )
-            except Exception:
-                logger.exception(f"💥 Failed to advance faction clock '{advance.faction}'")
-        for update in plan.participant_state_updates:
-            try:
-                apply_participant_state_update(
-                    ctx.campaign.id,
-                    name=update.name,
-                    role=update.role,
-                    stats_set=update.stats_set,
-                    status_added=update.status_added,
-                    status_removed=update.status_removed,
-                    modifiers_set=update.modifiers_set,
-                    notes=update.notes,
-                )
-            except Exception:
-                logger.exception(f"💥 Failed to apply participant state update for '{update.name}' ({update.role})")
+        # The three independent write loops run concurrently off the event
+        # loop. Each loop only catches/logs its own errors so one failure
+        # never silently swallows the others.
+        def _apply_threads() -> None:
+            for update in plan.thread_updates:
+                try:
+                    apply_thread_update(ctx.campaign.id, update.title, update.action, update.note)
+                except Exception:
+                    logger.exception(f"💥 Failed to apply thread update '{update.title}' ({update.action})")
+
+        def _apply_clocks() -> None:
+            for advance in plan.clock_advances:
+                try:
+                    advance_faction_clock(
+                        ctx.campaign.id, advance.faction, advance.ticks,
+                        reason=advance.reason, next_move=advance.next_move,
+                    )
+                except Exception:
+                    logger.exception(f"💥 Failed to advance faction clock '{advance.faction}'")
+
+        def _apply_participants() -> None:
+            for update in plan.participant_state_updates:
+                try:
+                    apply_participant_state_update(
+                        ctx.campaign.id,
+                        name=update.name,
+                        role=update.role,
+                        stats_set=update.stats_set,
+                        status_added=update.status_added,
+                        status_removed=update.status_removed,
+                        modifiers_set=update.modifiers_set,
+                        notes=update.notes,
+                    )
+                except Exception:
+                    logger.exception(f"💥 Failed to apply participant state update for '{update.name}' ({update.role})")
+
+        await asyncio.gather(
+            asyncio.to_thread(_apply_threads),
+            asyncio.to_thread(_apply_clocks),
+            asyncio.to_thread(_apply_participants),
+        )
 
         return {"messages": []}
 

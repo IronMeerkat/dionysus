@@ -18,9 +18,11 @@ from database.graphiti_utils import load_information, make_group_id
 from tools.lore_management import (
     bulk_save_lore_entries,
     delete_lore_entry,
+    list_lore_entries,
     save_lore_entry,
     search_entities,
     search_lore,
+    update_lore_entry,
 )
 from tools.npc_management import create_character
 from utils.llm_models import lore_creator, npc_builder
@@ -30,7 +32,15 @@ info_limits = settings.graphiti.information_limits
 
 logger = getLogger(__name__)
 
-LORE_TOOLS = [search_lore, search_entities, save_lore_entry, bulk_save_lore_entries, delete_lore_entry]
+LORE_TOOLS = [
+    search_lore,
+    search_entities,
+    list_lore_entries,
+    save_lore_entry,
+    bulk_save_lore_entries,
+    update_lore_entry,
+    delete_lore_entry,
+]
 BUILDER_TOOLS = [search_lore, search_entities, create_character]
 
 # Model call resilience: the nano-gpt endpoint intermittently returns a

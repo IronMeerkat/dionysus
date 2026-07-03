@@ -41,7 +41,11 @@ def make_builder_nodes(ctx: DMContext) -> dict:
             result = await builder_graph.ainvoke({"messages": transcript})
             delta = result["messages"][len(transcript):]
         except Exception:
+            # A returning NPC makes create_character hit the unique-name
+            # constraint and abort the shared session's transaction. Roll it
+            # back so downstream nodes (npc_registrar) can query/write again.
             logger.exception(f"💥 NPC builder graph failed for '{intro.name}'")
+            db_session.rollback()
             delta = []
 
         created = any(isinstance(m, ToolMessage) and m.name == "create_character" for m in delta)
@@ -86,22 +90,39 @@ def make_builder_nodes(ctx: DMContext) -> dict:
         }
 
     async def npc_registrar(state: DungeonMasterState) -> dict:
-        """🎭 Register the freshly built NPC into the scene and advance the build queue."""
+        """🎭 Register the NPC at the head of the build queue into the scene
+        and advance the queue.
+
+        The NPC is added to the conversation and given a ``CampaignNPC``
+        state row the moment they join -- whether they were just built fresh
+        or already existed in the database from a prior session. The character
+        lookup is the source of truth, so a returning NPC that the builder did
+        not re-create still gets registered into this campaign.
+        """
         intro = state.build_queue[0]
 
-        if state.build_created:
-            character = db_session.query(CharacterModel).filter(
-                CharacterModel.name == intro.name
-            ).first()
-            if character is None:
-                logger.error(f"❌ Builder reported success but '{intro.name}' not in DB")
-            else:
-                ctx.conversation.add_character(character)
-                ctx.conversation._npcs_introduced = True
-                ensure_campaign_npc(ctx.campaign.id, character.id)
-                logger.info(f"🎭 NPC '{intro.name}' introduced to scene (state row ensured)")
+        character = db_session.query(CharacterModel).filter(
+            CharacterModel.name == intro.name
+        ).first()
+        if character is None:
+            logger.error(
+                f"❌ NPC '{intro.name}' not found in DB; cannot register into "
+                f"campaign {ctx.campaign.id}"
+            )
         else:
-            logger.error(f"❌ Build negotiation for '{intro.name}' ended without persistence, skipping")
+            ctx.conversation.add_character(character)
+            ctx.conversation._npcs_introduced = True
+            ensure_campaign_npc(ctx.campaign.id, character.id)
+            if state.build_created:
+                logger.info(
+                    f"🎭 Newly built NPC '{intro.name}' introduced to scene "
+                    f"(campaign {ctx.campaign.id}, state row ensured)"
+                )
+            else:
+                logger.info(
+                    f"🎭 Existing NPC '{intro.name}' introduced to scene "
+                    f"(campaign {ctx.campaign.id}, state row ensured, no rebuild needed)"
+                )
 
         return {
             "messages": [],

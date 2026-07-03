@@ -1,4 +1,4 @@
-"""Shared turn context and the context-loading node for the DM supervisor."""
+"""Shared turn context and the context-loading nodes for the DM supervisor."""
 import asyncio
 from dataclasses import dataclass
 from logging import getLogger
@@ -76,10 +76,44 @@ class DMContext:
         return last_human.content if last_human else fallback
 
 
-def make_context_loader(ctx: DMContext):
-    async def context_loader(state: DungeonMasterState) -> dict:
-        """Load lore, world events, DM secrets, and player prefs in parallel,
-        plus structured world state (quest threads, faction clocks) from Postgres."""
+def make_state_loader(ctx: DMContext):
+    async def state_loader(state: DungeonMasterState) -> dict:
+        """🗄️ Load structured world state from Postgres: quest threads, faction
+        clocks, and participant mechanical state.
+
+        Cheap, so it runs first -- the intent router only needs player_state,
+        which lets the slow Graphiti retrieval overlap with intent classification.
+        """
+        threads_rows, clocks_rows, player_state, npc_states = await asyncio.gather(
+            asyncio.to_thread(list_open_threads, ctx.campaign.id),
+            asyncio.to_thread(list_faction_clocks, ctx.campaign.id),
+            asyncio.to_thread(render_player_state, ctx.campaign.id, ctx.player.id),
+            asyncio.to_thread(render_npc_states, ctx.campaign.id, list(ctx.conversation.characters)),
+        )
+        threads = render_threads(threads_rows)
+        clocks = render_clocks(clocks_rows)
+
+        logger.info(
+            f"🗄️ World state loaded: {len(threads.splitlines())} threads, "
+            f"{len(clocks.splitlines())} clocks, "
+            f"{len(player_state.splitlines())} player-state, "
+            f"{len(npc_states.splitlines())} npc-state lines"
+        )
+        return {
+            "messages": [],
+            "open_threads": threads,
+            "faction_clocks": clocks,
+            "player_state": player_state,
+            "active_npc_states": npc_states,
+        }
+
+    return state_loader
+
+
+def make_graphiti_loader(ctx: DMContext):
+    async def graphiti_loader(state: DungeonMasterState) -> dict:
+        """📚 Load lore, world events, DM secrets, and player prefs from
+        Graphiti in parallel. Runs concurrently with the intent router."""
         query = ctx.last_human_query(state)
 
         group_ids = [
@@ -89,21 +123,14 @@ def make_context_loader(ctx: DMContext):
             make_player_prefs_group_id(ctx.campaign.id),
         ]
         lore, events, secrets, prefs = await asyncio.gather(
-            *(load_information(query=query, group_ids=[gid], limit=info_limits.lore) for gid in group_ids)
+            *(load_information(query=query, group_ids=[gid], limit=info_limits.lore)
+              for gid in group_ids)
         )
 
-        threads = render_threads(list_open_threads(ctx.campaign.id))
-        clocks = render_clocks(list_faction_clocks(ctx.campaign.id))
-        player_state = render_player_state(ctx.campaign.id, ctx.player.id)
-        npc_states = render_npc_states(ctx.campaign.id, list(ctx.conversation.characters))
-
         logger.info(
-            f"📚 Context loaded: {len(lore.splitlines())} lore, "
+            f"📚 Graphiti context loaded: {len(lore.splitlines())} lore, "
             f"{len(events.splitlines())} events, {len(secrets.splitlines())} secrets, "
-            f"{len(prefs.splitlines())} prefs, "
-            f"{len(threads.splitlines())} threads, {len(clocks.splitlines())} clocks, "
-            f"{len(player_state.splitlines())} player-state, "
-            f"{len(npc_states.splitlines())} npc-state lines"
+            f"{len(prefs.splitlines())} prefs lines"
         )
         return {
             "messages": [],
@@ -111,10 +138,6 @@ def make_context_loader(ctx: DMContext):
             "world_events": events,
             "secret_knowledge": secrets,
             "player_prefs": prefs or "(nothing learned yet)",
-            "open_threads": threads,
-            "faction_clocks": clocks,
-            "player_state": player_state,
-            "active_npc_states": npc_states,
         }
 
-    return context_loader
+    return graphiti_loader
