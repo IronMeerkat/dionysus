@@ -6,14 +6,14 @@ import Chat from './pages/Chat';
 import Lore from './pages/Lore';
 import LoreChat from './pages/LoreChat';
 import SessionSetup from './pages/SessionSetup';
-import Players from './pages/Players';
-import NPCs from './pages/NPCs';
+import Characters from './pages/Characters';
 import Campaigns from './pages/Campaigns';
 import CampaignDetail from './pages/CampaignDetail';
 import CreateCampaign from './pages/CreateCampaign';
 import CharacterMemories from './pages/CharacterMemories';
 import NPCBuilderChat from './pages/NPCBuilderChat';
 import CampaignAdminChat from './pages/CampaignAdminChat';
+import CampaignNegotiationChat from './pages/CampaignNegotiationChat';
 
 async function loadFlyonUI() {
   return import('flyonui/flyonui');
@@ -51,13 +51,13 @@ function App() {
         <Route path="/session-setup" element={<SessionSetup sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />}/>
         <Route path="/lore" element={<Lore />} />
         <Route path="/lore-chat" element={<LoreChat />} />
-        <Route path="/players" element={<Players />} />
-        <Route path="/npcs" element={<NPCs />} />
+        <Route path="/characters" element={<Characters />} />
         <Route path="/npc-builder" element={<NPCBuilderChat />} />
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/campaigns/new" element={<CreateCampaign />} />
         <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/campaign-admin" element={<CampaignAdminChat />} />
+        <Route path="/campaign-negotiation" element={<CampaignNegotiationChat />} />
         <Route path="/campaigns/:campaignId/npcs/:npcId/memories" element={<CharacterMemories />} />
       </Routes>
     </div>

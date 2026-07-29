@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
 
-from database.models import Campaign, Character, Player, Conversation
+from database.models import Campaign, Character, Conversation
 from database.postgres_connection import session
 
 logger = logging.getLogger(__name__)
@@ -54,9 +54,10 @@ def setup_session(
     campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    player = session.query(Player).filter(Player.id == player_id).first()
+    # The player is whichever character the conversation designates as the PC.
+    player = session.query(Character).filter(Character.id == player_id).first()
     if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
+        raise HTTPException(status_code=404, detail="Player character not found")
     characters = session.query(Character).filter(Character.id.in_(character_ids)).all()
     if not characters:
         raise HTTPException(status_code=404, detail="Characters not found")
@@ -72,10 +73,8 @@ def setup_session(
 
 @session_router.get("/options")
 def get_options() -> dict:
-    players = session.query(Player.id, Player.name).order_by(Player.id.asc()).all()
     characters = session.query(Character.id, Character.name).order_by(Character.id.asc()).all()
     return {
-        "players": [{"id": p.id, "name": p.name} for p in players],
         "characters": [{"id": c.id, "name": c.name} for c in characters],
     }
 

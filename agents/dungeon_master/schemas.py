@@ -27,6 +27,9 @@ class IntentReading(BaseModel):
         "True only for in-character actions whose outcome is genuinely uncertain "
         "AND consequential. False for dialogue, trivial actions, and questions."))
     summary: str = Field(description="One short line stating what the player is trying to accomplish.")
+    lore_entry_ids: list[int] = Field(default_factory=list, description=(
+        "Ids of lore entries from the LORE LIBRARY catalog worth reading in full for this turn. "
+        "Empty for small talk, OOC questions, or when no entry is relevant."))
 
     def render(self) -> str:
         return (
@@ -54,7 +57,16 @@ class AdjudicationRuling(BaseModel):
         "Difficulty class: 5 very easy, 10 easy, 15 moderate, 20 hard, 25 very hard, "
         "30 nearly impossible. Only for ruling='roll'."))
     advantage: Literal["advantage", "normal", "disadvantage"] = Field(
-        default="normal", description="Whether circumstances favor or hinder the attempt.")
+        default="normal", description=(
+            "Whether circumstances favor or hinder the attempt. MUST reflect any "
+            "active status effect whose 'affects' matches this check."))
+    modifier: int = Field(default=0, ge=-10, le=10, description=(
+        "Flat bonus/penalty to the roll from status effects and circumstances. "
+        "Sum the roll_modifier of every active status effect that applies to this check; "
+        "0 when none apply. Only for ruling='roll'."))
+    applied_effects: list[str] = Field(default_factory=list, description=(
+        "Names of the status effects (permanent sheet effects or temporary conditions) "
+        "this ruling accounted for in advantage/modifier. Empty when none applied."))
     success_stakes: str = Field(description="What concretely happens on success.")
     failure_stakes: str = Field(description=(
         "What concretely happens on failure -- never a dead end: it costs time, "
@@ -71,11 +83,33 @@ class Adjudication(AdjudicationRuling):
     outcome: Literal["success", "failure", "critical_success", "critical_failure"] | None = Field(
         default=None, description="The resolved outcome this turn must respect.")
 
+    def render_roll_line(self, player_name: str) -> str:
+        """🎲 Compact player-facing summary of the dice resolution."""
+        if not self.rolls:
+            return ""
+        kept = (
+            max(self.rolls) if self.advantage == "advantage"
+            else min(self.rolls) if self.advantage == "disadvantage"
+            else self.rolls[0]
+        )
+        rolls = "/".join(str(r) for r in self.rolls)
+        mod = f" {self.modifier:+d}" if self.modifier else ""
+        adv = f", {self.advantage}" if self.advantage != "normal" else ""
+        outcome = (self.outcome or "").replace("_", " ")
+        label = f" — {self.check_label}" if self.check_label else ""
+        return (
+            f"🎲 {player_name}{label} vs DC {self.dc}: "
+            f"d20[{rolls}] kept {kept}{mod} = {self.total}{adv} → {outcome}"
+        )
+
     def render(self) -> str:
         lines = [f"Ruling: {self.ruling} -- {self.reason}"]
         if self.ruling == "roll" and self.check_label:
             adv = f", {self.advantage}" if self.advantage != "normal" else ""
-            lines.append(f"Check: {self.check_label} vs DC {self.dc}{adv}")
+            mod = f", modifier {self.modifier:+d}" if self.modifier else ""
+            lines.append(f"Check: {self.check_label} vs DC {self.dc}{adv}{mod}")
+        if self.applied_effects:
+            lines.append(f"Status effects applied: {', '.join(self.applied_effects)}")
         if self.rolls:
             rolls = "/".join(str(r) for r in self.rolls)
             lines.append(f"Dice: d20[{rolls}] -> total {self.total}")
@@ -116,6 +150,33 @@ class NewClock(BaseModel):
     next_move: str = Field(default="", description="The faction's immediate next step.")
 
 
+class MechanicsDocUpdate(BaseModel):
+    """A full replacement for one negotiated mechanics document whose tracked state moved."""
+    title: str = Field(description="Exact title of the existing mechanics document being replaced.")
+    content: str = Field(description=(
+        "The COMPLETE new markdown of the document, dashboard and track state advanced "
+        "per the document's own rules. Replaces the stored document wholesale -- include "
+        "everything, not just the changed sections."))
+
+
+class SceneChangeReport(BaseModel):
+    """The scene-change detector's verdict plus the state consequences of the turn."""
+    changed: bool = Field(description=(
+        "True when the conversation indicates a scene change: time skip, new "
+        "location, new setting, or events that clearly end the current scene."))
+    location: str | None = Field(default=None, description=(
+        "The new current location when the scene moved somewhere the recorded "
+        "location no longer describes. None when unchanged."))
+    world_clock: str | None = Field(default=None, description=(
+        "The new narrative time when meaningful time passed, e.g. 'Day 4, dawn'. "
+        "None when barely any time passed."))
+    mechanics_updates: list[MechanicsDocUpdate] = Field(default_factory=list, description=(
+        "Full replacements for negotiated mechanics documents whose tracked state "
+        "moved this turn. Empty when no document's rules fired."))
+    reason: str = Field(default="", description=(
+        "One line naming the triggers fired, or why nothing moved."))
+
+
 # ------------------------------------------------------------------
 # NPC orchestration
 # ------------------------------------------------------------------
@@ -128,6 +189,25 @@ class NPCDirective(BaseModel):
         "Facts this NPC must NOT reveal or reference (information asymmetry)."))
 
 
+class StatusEffectPatch(BaseModel):
+    """A temporary, campaign-scoped status effect to add to a participant.
+
+    Temporary effects are freeform per campaign -- invent whatever condition
+    fits the fiction. The mechanical fields tell the DM how the condition
+    bites into dice while it lasts.
+    """
+    name: str = Field(description="Condition name, e.g. 'poisoned', 'inspired', 'shaken'.")
+    note: str | None = Field(default=None, description=(
+        "One-line note on what the condition is or how it feels in play."))
+    affects: str | None = Field(default=None, description=(
+        "Which rolls the condition modifies, in plain words, e.g. 'attack rolls', "
+        "'social checks'. Null when it has no mechanical reach."))
+    roll_modifier: int = Field(default=0, description=(
+        "Flat bonus/penalty applied to the affected rolls while the condition lasts."))
+    advantage: Literal["advantage", "normal", "disadvantage"] = Field(
+        default="normal", description="Advantage state on the affected rolls.")
+
+
 class ParticipantStateUpdate(BaseModel):
     """A structured patch to a participant's live mechanical state this turn.
 
@@ -136,16 +216,14 @@ class ParticipantStateUpdate(BaseModel):
     deterministically by the canon manager -- the LLM never writes state directly.
     """
     name: str = Field(description=(
-        "Exact name of the participant whose state changes this turn. "
-        "For role='player' this is the player character's name; for role='npc' "
-        "it must match an NPC in the active NPC list."))
-    role: Literal["player", "npc"] = Field(description=(
-        "player = the player character; npc = a non-player character in the scene."))
+        "Exact name of the participant whose state changes this turn: "
+        "the player character's name, or a name from the active NPC list."))
     stats_set: dict[str, int] = Field(default_factory=dict, description=(
         "Stats to set or overwrite by key, e.g. {'hp': 8, 'ac': 14}. "
         "Empty dict leaves stats unchanged."))
-    status_added: list[str] = Field(default_factory=list, description=(
-        "Status effects to add, e.g. ['poisoned', 'frightened']. Empty to add none."))
+    status_added: list[StatusEffectPatch] = Field(default_factory=list, description=(
+        "Temporary status effects to add, with their roll mechanics. "
+        "Empty to add none."))
     status_removed: list[str] = Field(default_factory=list, description=(
         "Status effects to remove, e.g. ['inspired']. Empty to remove none."))
     modifiers_set: dict[str, int] = Field(default_factory=dict, description=(
@@ -197,13 +275,26 @@ class DMPlan(BaseModel):
     secret_notes: str | None = Field(default=None, description=(
         "DM-only knowledge that should be remembered for future turns "
         "but NEVER revealed to NPCs or the player."))
+    adjudication: AdjudicationRuling | None = Field(default=None, description=(
+        "POPULATE ONLY when the intent reading says the player's action needs adjudication: "
+        "your ruling on the action (ruling type, check label, DC, advantage, stakes). "
+        "Dice are rolled deterministically by code after you rule, and your stakes become "
+        "the canon outcome. Null for plain dialogue, trivial actions, and questions."))
     action_outcome: str | None = Field(default=None, description=(
-        "How the player's attempted action resolves. When the referee adjudicated the action, "
-        "this MUST narratively express the adjudicated outcome -- a failed roll stays a failure. "
-        "None for plain dialogue. Narrate failures as interesting story beats, not dead ends."))
+        "How the player's attempted action resolves. When the action was adjudicated, "
+        "leave this None -- the ruling's stakes are resolved into the outcome by code "
+        "after the dice roll. For unadjudicated actions with an uncertain result, "
+        "narrate the outcome here, failures as interesting story beats, not dead ends. "
+        "None for plain dialogue."))
     time_location_update: str | None = Field(default=None, description=(
         "New location or time-of-day description if the scene changes. "
         "None if the scene stays the same."))
+    mechanics_moved: bool = Field(default=False, description=(
+        "True when this turn's events should move tracked state in a negotiated "
+        "campaign mechanics document (a spike landed, a rung clamped, a recovery "
+        "move used, a scene or leg boundary the document's rules key off). The "
+        "scene-change updater revises the documents after the turn. False for "
+        "ordinary turns, and always False when no mechanics documents exist."))
     thread_updates: list[ThreadUpdate] = Field(default_factory=list, description=(
         "Quest threads to open, progress, resolve, or abandon this turn. "
         "Open threads for promises, mysteries, and debts; close them when settled."))
@@ -273,6 +364,7 @@ class DungeonMasterState(BaseModel):
     messages: Annotated[list[AnyMessage], operator.add]
     plan: DMPlan | None = None
     lore: str = ""
+    lore_catalog: str = "(no lore entries in this world)"
     world_events: str = ""
     secret_knowledge: str = ""
     # Supervisor pipeline

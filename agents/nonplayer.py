@@ -11,26 +11,18 @@ from pydantic import BaseModel, Field
 
 from hephaestus.settings import settings
 
-from database.graphiti_utils import (
-    fire_and_forget,
-    load_information,
-    make_group_id,
-    make_memory_group_id,
-    process_and_save_memory,
-)
+from database.knowledge import process_and_save_memory, recall_memories
 from database.models import Character as CharacterModel
 from database.models.conversation import Conversation
-from tools.participants import render_npc_state, render_player_state
+from tools.participants import render_participant_state
+from tools.status_effects import character_sheet
 from utils.llm_models import npc_narration
-from utils.prompts import (
-    character_episodic_memory,
-    narrator_prompt_template,
-)
+from utils.prompts import narrator_prompt_template
+from utils.tasks import fire_and_forget
 
 if TYPE_CHECKING:
     from agents.dungeon_master import NPCDirective
 
-info_limits = settings.graphiti.information_limits
 logger = getLogger(__name__)
 
 
@@ -123,7 +115,7 @@ def spawn_npc_directed(
     """
 
     other_characters = "\n\n\n".join(
-        f"**{c.name}**:\n{c.description}"
+        f"**{c.name}**:\n{character_sheet(c)}"
         for c in conversation.characters
         if c.id != character.id
     )
@@ -150,9 +142,9 @@ def spawn_npc_directed(
         def combined_dump(self) -> dict:
             return {
                 "name": character.name,
-                "description": character.description + withheld_block,
+                "description": character_sheet(character) + withheld_block,
                 "other_characters": other_characters,
-                "player": conversation.player.description,
+                "player": character_sheet(conversation.player),
                 "player_name": conversation.player.name,
                 "location": conversation.campaign.location,
                 "story_background": conversation.campaign.story_background,
@@ -162,24 +154,24 @@ def spawn_npc_directed(
             }
 
     async def context_loader(state: NPCState) -> dict:
+        """🧠 Load this NPC's memories (pgvector recall) and live participant
+        states. Lore arrives in the initial state from the DM's retriever."""
         last_human = next((m for m in reversed(state.messages) if isinstance(m, HumanMessage)), None)
         query = last_human.content if last_human else character.name
-        lore, memories = await asyncio.gather(
-            load_information(
-                query=query,
-                group_ids=[make_group_id("lore", conversation.campaign.lore_world)],
-                limit=info_limits.lore,
-            ),
-            load_information(
-                query=query,
-                group_ids=[make_memory_group_id(conversation.campaign.id, character.name)],
-                limit=info_limits.memories,
-            ),
+
+        # The two renders share the codebase's one global Session, so they
+        # run sequentially on a single thread to avoid a concurrent commit.
+        def _participant_states() -> tuple[str, str]:
+            return (
+                render_participant_state(conversation.campaign.id, character.id, character.name),
+                render_participant_state(conversation.campaign.id, conversation.player.id),
+            )
+
+        memories, (self_state, player_state) = await asyncio.gather(
+            recall_memories(conversation.campaign.id, character.id, query),
+            asyncio.to_thread(_participant_states),
         )
-        self_state = render_npc_state(conversation.campaign.id, character.id, character.name)
-        player_state = render_player_state(conversation.campaign.id, conversation.player.id)
         return {
-            "lore": lore,
             "memories": memories,
             "self_state": self_state,
             "player_state": player_state,
@@ -201,9 +193,8 @@ def spawn_npc_directed(
         response.id = str(uuid4())
         fire_and_forget(process_and_save_memory(
             messages=state.combined_messages,
-            group_id=make_memory_group_id(conversation.campaign.id, character.name),
-            source_description=f"session:{conversation.campaign.lore_world}",
-            perspective=character_episodic_memory.compile(name=character.name, description=character.description),
+            campaign_id=conversation.campaign.id,
+            character_id=character.id,
             character_name=character.name,
             character_description=character.description,
         ))

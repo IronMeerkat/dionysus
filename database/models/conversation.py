@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import reconstructor, relationship
 
 from database.postgres_connection import Base, session
-from database.models import Player, Character
+from database.models import Character
 
 
 logger = getLogger(__name__)
@@ -88,7 +88,7 @@ class Message(Base):
 
 
 class Conversation(Base):
-    """🎭 A conversation between a player and one or more characters.
+    """🎭 A conversation between a player character and one or more NPCs.
 
     Tracks participants, stores every message, and can be converted
     straight into an ``AgentSwarmState`` dict for graph execution.
@@ -102,7 +102,9 @@ class Conversation(Base):
 
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=True)
-    player_id = Column(Integer, ForeignKey("players.id"), nullable=True, index=True)
+    # The player character of this conversation: any character can be the PC,
+    # and which one is decided here, at the conversation level.
+    player_id = Column(Integer, ForeignKey("characters.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True),nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -111,7 +113,7 @@ class Conversation(Base):
     # --- relationships ---------------------------------------------------
 
     campaign = relationship("Campaign", back_populates="conversations", lazy="selectin")
-    player = relationship("Player", lazy="selectin")
+    player = relationship("Character", lazy="selectin")
     characters = relationship("Character", secondary=conversation_characters, lazy="selectin")
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan", lazy="selectin")
 
@@ -197,8 +199,8 @@ class Conversation(Base):
 
 
     @classmethod
-    def create(cls, player: Player, characters: list[Character], campaign_id: int) -> "Conversation":
-        """🎭 Create a new conversation between a player and one or more characters.
+    def create(cls, player: Character, characters: list[Character], campaign_id: int) -> "Conversation":
+        """🎭 Create a new conversation between a player character and one or more NPCs.
 
         Scene location, story background, and narrative time are owned by the
         campaign / its world state, not the conversation, so they are not set here.

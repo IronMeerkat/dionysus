@@ -5,10 +5,10 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import BuildReview, DungeonMasterState
-from agents.tool_agent import spawn_npc_builder
+from agents.skilled_agent import WORLD_SKILLS, spawn_skilled_agent
 from database.models import Character as CharacterModel
 from database.postgres_connection import session as db_session
-from tools.participants import ensure_campaign_npc
+from tools.participants import ensure_campaign_participant
 from utils.llm_models import dm_planner_model
 from utils.prompts import dm_npc_reviewer_prompt_template
 
@@ -36,7 +36,12 @@ def make_builder_nodes(ctx: DMContext) -> dict:
                 f"Build instructions:\n{intro.build_instructions}"
             ))]
 
-        builder_graph = spawn_npc_builder(ctx.campaign.lore_world)
+        builder_graph = spawn_skilled_agent(
+            WORLD_SKILLS,
+            active=["npc-building"],
+            world_name=ctx.campaign.lore_world,
+            name="npc_builder",
+        )
         try:
             result = await builder_graph.ainvoke({"messages": transcript})
             delta = result["messages"][len(transcript):]
@@ -93,7 +98,7 @@ def make_builder_nodes(ctx: DMContext) -> dict:
         """🎭 Register the NPC at the head of the build queue into the scene
         and advance the queue.
 
-        The NPC is added to the conversation and given a ``CampaignNPC``
+        The NPC is added to the conversation and given a ``CampaignParticipant``
         state row the moment they join -- whether they were just built fresh
         or already existed in the database from a prior session. The character
         lookup is the source of truth, so a returning NPC that the builder did
@@ -112,7 +117,7 @@ def make_builder_nodes(ctx: DMContext) -> dict:
         else:
             ctx.conversation.add_character(character)
             ctx.conversation._npcs_introduced = True
-            ensure_campaign_npc(ctx.campaign.id, character.id)
+            ensure_campaign_participant(ctx.campaign.id, character.id)
             if state.build_created:
                 logger.info(
                     f"🎭 Newly built NPC '{intro.name}' introduced to scene "

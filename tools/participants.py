@@ -1,21 +1,24 @@
-"""Deterministic participant-state helpers: campaign-scoped player/NPC vitals.
+"""Deterministic participant-state helpers: campaign-scoped character vitals.
 
 Layer-1 deterministic functions ("narrator decorates, canon decides"): the DM
 planner produces structured ``ParticipantStateUpdate`` patches, and these
-helpers resolve them to a (campaign, participant) row and apply them to
+helpers resolve them to a (campaign, character) row and apply them to
 Postgres with validation and audit logging. No LLM ever writes state directly.
 
 The mechanical state itself is a freeform JSONB blob (see
-``CampaignPlayer`` / ``CampaignNPC``); these helpers only standardise the
-well-known sub-keys (stats / status_effects / modifiers / notes) and render
-them prompt-ready. Any other keys are preserved and rendered generically.
+``CampaignParticipant``); these helpers only standardise the well-known
+sub-keys (stats / status_effects / modifiers / notes) and render them
+prompt-ready. Any other keys are preserved and rendered generically.
+
+Players and NPCs share the same table: which character is the PC is a
+conversation-level decision, so these helpers never distinguish by role.
 """
 from logging import getLogger
 from typing import Any
 
 import json
 
-from database.models import CampaignNPC, CampaignPlayer, Character, Player
+from database.models import CampaignParticipant, Character
 from database.models.participants import DEFAULT_PARTICIPANT_STATE
 from database.postgres_connection import session
 
@@ -26,51 +29,27 @@ logger = getLogger(__name__)
 # Lookups + ensure
 # ------------------------------------------------------------------
 
-def get_campaign_player(campaign_id: int, player_id: int) -> CampaignPlayer | None:
-    """🎲 Fetch a player's campaign state row, or None."""
+def get_campaign_participant(campaign_id: int, character_id: int) -> CampaignParticipant | None:
+    """🎲 Fetch a character's campaign state row, or None."""
     return (
-        session.query(CampaignPlayer)
+        session.query(CampaignParticipant)
         .filter(
-            CampaignPlayer.campaign_id == campaign_id,
-            CampaignPlayer.player_id == player_id,
+            CampaignParticipant.campaign_id == campaign_id,
+            CampaignParticipant.character_id == character_id,
         )
         .first()
     )
 
 
-def ensure_campaign_player(campaign_id: int, player_id: int) -> CampaignPlayer:
-    """🎲 Get a player's campaign state row, creating an empty one if missing."""
-    row = get_campaign_player(campaign_id, player_id)
+def ensure_campaign_participant(campaign_id: int, character_id: int) -> CampaignParticipant:
+    """🎲 Get a character's campaign state row, creating an empty one if missing."""
+    row = get_campaign_participant(campaign_id, character_id)
     if row is not None:
         return row
-    row = CampaignPlayer(campaign_id=campaign_id, player_id=player_id)
+    row = CampaignParticipant(campaign_id=campaign_id, character_id=character_id)
     session.add(row)
     session.commit()
-    logger.info(f"🎲 Created campaign_players row (campaign {campaign_id}, player {player_id})")
-    return row
-
-
-def get_campaign_npc(campaign_id: int, character_id: int) -> CampaignNPC | None:
-    """🎭 Fetch an NPC's campaign state row, or None."""
-    return (
-        session.query(CampaignNPC)
-        .filter(
-            CampaignNPC.campaign_id == campaign_id,
-            CampaignNPC.character_id == character_id,
-        )
-        .first()
-    )
-
-
-def ensure_campaign_npc(campaign_id: int, character_id: int) -> CampaignNPC:
-    """🎭 Get an NPC's campaign state row, creating an empty one if missing."""
-    row = get_campaign_npc(campaign_id, character_id)
-    if row is not None:
-        return row
-    row = CampaignNPC(campaign_id=campaign_id, character_id=character_id)
-    session.add(row)
-    session.commit()
-    logger.info(f"🎭 Created campaign_npcs row (campaign {campaign_id}, character {character_id})")
+    logger.info(f"🎲 Created campaign_participants row (campaign {campaign_id}, character {character_id})")
     return row
 
 
@@ -83,6 +62,48 @@ def _format_value(value: Any) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     return str(value)
+
+
+def _normalise_effect(entry: Any) -> dict:
+    """Coerce a legacy string or partial dict into the effect shape.
+
+    Status effects are stored sparsely: ``name`` plus only the mechanical
+    keys that are actually set (note / affects / roll_modifier / advantage).
+    Legacy plain-string entries become ``{"name": ...}``.
+    """
+    if isinstance(entry, str):
+        return {"name": entry.strip()}
+    if isinstance(entry, dict):
+        out = {"name": str(entry.get("name", "")).strip()}
+        for key in ("note", "affects", "roll_modifier", "advantage"):
+            value = entry.get(key)
+            if value is not None and value != "" and not (
+                key == "roll_modifier" and value == 0
+            ) and not (key == "advantage" and value == "normal"):
+                out[key] = value
+        return out
+    logger.warning(f"⚠️ Unrecognised status effect entry {entry!r}, coercing to name")
+    return {"name": str(entry)}
+
+
+def _render_effect_entry(entry: dict) -> str:
+    """Render one structured effect, e.g. ``poisoned (-2, affects: attacks; venom)``."""
+    name = entry.get("name") or "?"
+    mechanics = []
+    modifier = entry.get("roll_modifier")
+    if isinstance(modifier, (int, float)) and modifier:
+        mechanics.append(f"{modifier:+d}")
+    advantage = entry.get("advantage")
+    if advantage and advantage != "normal":
+        mechanics.append(str(advantage))
+    mech = f" ({', '.join(mechanics)})" if mechanics else ""
+    details = []
+    if entry.get("affects"):
+        details.append(f"affects: {entry['affects']}")
+    if entry.get("note"):
+        details.append(str(entry["note"]))
+    suffix = f" [{'; '.join(details)}]" if details else ""
+    return f"{name}{mech}{suffix}"
 
 
 def _render_state_blob(state: dict | None) -> str:
@@ -106,7 +127,9 @@ def _render_state_blob(state: dict | None) -> str:
 
     effects = state.get("status_effects")
     if isinstance(effects, list) and effects:
-        lines.append("status: " + ", ".join(str(e) for e in effects))
+        lines.append(
+            "status: " + ", ".join(_render_effect_entry(_normalise_effect(e)) for e in effects)
+        )
 
     modifiers = state.get("modifiers")
     if isinstance(modifiers, dict) and modifiers:
@@ -137,26 +160,26 @@ def _render_state_blob(state: dict | None) -> str:
     return "\n".join(lines) if lines else "(no tracked mechanical state)"
 
 
-def render_player_state(campaign_id: int, player_id: int) -> str:
-    """🎲 Render the player's live mechanical state as a prompt block."""
-    row = ensure_campaign_player(campaign_id, player_id)
-    return _render_state_blob(row.state)
+def render_participant_state(campaign_id: int, character_id: int, name: str | None = None) -> str:
+    """🎲 Render a single participant's live mechanical state as a prompt block.
 
-
-def render_npc_state(campaign_id: int, character_id: int, name: str) -> str:
-    """🎭 Render a single NPC's live mechanical state under its name."""
-    row = ensure_campaign_npc(campaign_id, character_id)
+    With no ``name`` the bare blob is returned (used for the PC block); with a
+    name the blob is headed by ``**name**:`` (used for NPC rosters).
+    """
+    row = ensure_campaign_participant(campaign_id, character_id)
     blob = _render_state_blob(row.state)
+    if name is None:
+        return blob
     if blob == "(no tracked mechanical state)":
         return f"**{name}**: {blob}"
     return f"**{name}**:\n{blob}"
 
 
-def render_npc_states(campaign_id: int, characters: list[Character]) -> str:
-    """🎭 Render all active NPCs' mechanical state as one prompt block."""
+def render_participant_states(campaign_id: int, characters: list[Character]) -> str:
+    """🎭 Render all given participants' mechanical state as one prompt block."""
     if not characters:
         return "(no NPCs in scene)"
-    blocks = [render_npc_state(campaign_id, c.id, c.name) for c in characters]
+    blocks = [render_participant_state(campaign_id, c.id, c.name) for c in characters]
     if all("(no tracked mechanical state)" in b for b in blocks):
         return "(no tracked mechanical state for active NPCs)"
     return "\n\n".join(blocks)
@@ -176,42 +199,37 @@ def _normalise_state(state: dict | None) -> dict:
     return state
 
 
-def _resolve_participant(campaign_id: int, name: str, role: str) -> CampaignPlayer | CampaignNPC | None:
-    """Find the campaign state row for a named participant, or None."""
-    if role == "player":
-        player = session.query(Player).filter(Player.name == name).first()
-        if player is None:
-            return None
-        return ensure_campaign_player(campaign_id, player.id)
-    if role == "npc":
-        character = session.query(Character).filter(Character.name == name).first()
-        if character is None:
-            return None
-        return ensure_campaign_npc(campaign_id, character.id)
-    return None
+def _resolve_participant(campaign_id: int, name: str) -> CampaignParticipant | None:
+    """Find the campaign state row for a named character, or None."""
+    character = session.query(Character).filter(Character.name == name).first()
+    if character is None:
+        return None
+    return ensure_campaign_participant(campaign_id, character.id)
 
 
 def apply_participant_state_update(
     campaign_id: int,
     *,
     name: str,
-    role: str,
     stats_set: dict[str, int] | None = None,
-    status_added: list[str] | None = None,
+    status_added: list[str | dict] | None = None,
     status_removed: list[str] | None = None,
     modifiers_set: dict[str, int] | None = None,
     notes: str | None = None,
-) -> CampaignPlayer | CampaignNPC | None:
-    """🎲🎭 Apply a structured patch to a participant's live state.
+) -> CampaignParticipant | None:
+    """🎲 Apply a structured patch to a participant's live state.
 
-    Stats and modifiers are merged by key (overwrite); status effects are
-    added/removed with case-insensitive set semantics; notes are replaced when
-    provided. The blob is reassigned so SQLAlchemy persists the JSONB change.
-    Returns the updated row, or None if the participant could not be resolved.
+    Stats and modifiers are merged by key (overwrite); notes are replaced
+    when provided. Status effects are stored as sparse dicts
+    ``{name, note?, affects?, roll_modifier?, advantage?}`` (legacy plain
+    strings are normalised on write) with case-insensitive set semantics by
+    name: adding an existing name merges any mechanical keys the patch
+    carries. The blob is reassigned so SQLAlchemy persists the JSONB change.
+    Returns the updated row, or None if the character could not be resolved.
     """
-    row = _resolve_participant(campaign_id, name.strip(), role.strip().lower())
+    row = _resolve_participant(campaign_id, name.strip())
     if row is None:
-        logger.warning(f"⚠️ Participant state update skipped: no {role} named '{name}' in campaign {campaign_id}")
+        logger.warning(f"⚠️ Participant state update skipped: no character named '{name}' in campaign {campaign_id}")
         return None
 
     state = _normalise_state(row.state)
@@ -221,18 +239,26 @@ def apply_participant_state_update(
         state["stats"][key] = value
         changed = True
 
-    effects = [str(e).strip() for e in (state["status_effects"] or []) if str(e).strip()]
-    lower_existing = {e.lower(): e for e in effects}
+    effects = [e for e in (_normalise_effect(x) for x in (state["status_effects"] or [])) if e["name"]]
+    lower_existing = {e["name"].lower(): e for e in effects}
     for add in (status_added or []):
-        add = add.strip()
-        if add and add.lower() not in lower_existing:
-            effects.append(add)
-            lower_existing[add.lower()] = add
+        entry = _normalise_effect(add)
+        key = entry["name"].lower()
+        if not key:
+            continue
+        if key in lower_existing:
+            mechanics = {k: v for k, v in entry.items() if k != "name"}
+            if mechanics:
+                lower_existing[key].update(mechanics)
+                changed = True
+        else:
+            effects.append(entry)
+            lower_existing[key] = entry
             changed = True
     for rem in (status_removed or []):
         rem = rem.strip().lower()
         if rem and rem in lower_existing:
-            effects = [e for e in effects if e.lower() != rem]
+            effects = [e for e in effects if e["name"].lower() != rem]
             del lower_existing[rem]
             changed = True
     state["status_effects"] = effects
@@ -246,11 +272,11 @@ def apply_participant_state_update(
         changed = True
 
     if not changed:
-        logger.info(f"📋 Participant state update for '{name}' ({role}) was empty, nothing changed")
+        logger.info(f"📋 Participant state update for '{name}' was empty, nothing changed")
         return row
 
     row.state = state
     session.add(row)
     session.commit()
-    logger.info(f"📋 Updated {role} '{name}' state in campaign {campaign_id}: {state}")
+    logger.info(f"📋 Updated '{name}' state in campaign {campaign_id}: {state}")
     return row

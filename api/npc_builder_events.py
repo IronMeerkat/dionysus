@@ -4,7 +4,7 @@ import socketio
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage, ToolMessageChunk
 from langchain_core.runnables import RunnableConfig
 
-from agents.tool_agent import spawn_npc_builder
+from agents.skilled_agent import WORLD_SKILLS, spawn_skilled_agent
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,12 @@ def register_npc_builder_events(sio: socketio.AsyncServer) -> None:
             return
 
         try:
-            graph = spawn_npc_builder(world_name)
+            graph = spawn_skilled_agent(
+                WORLD_SKILLS,
+                active=["npc-building"],
+                world_name=world_name,
+                name="npc_builder",
+            )
             await sio.save_session(sid, {
                 "graph": graph,
                 "world_name": world_name,
@@ -80,7 +85,7 @@ def register_npc_builder_events(sio: socketio.AsyncServer) -> None:
                 namespace_tuple, (msg, metadata) = item
                 langgraph_node = metadata.get("langgraph_node", "")
 
-                if isinstance(msg, AIMessageChunk) and langgraph_node == "agent":
+                if isinstance(msg, AIMessageChunk) and langgraph_node in ("agent", "model"):
                     if msg.content:
                         token = str(msg.content)
                         collected_text += token

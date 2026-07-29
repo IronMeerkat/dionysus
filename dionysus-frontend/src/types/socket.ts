@@ -135,3 +135,26 @@ export interface CampaignAdminClientToServerEvents {
   init_campaign_admin_session: (payload: { campaign_id: number }) => void;
   campaign_admin_message: (payload: { content: string }) => void;
 }
+
+// ---- Campaign Negotiation namespace (/campaign-negotiation) ----
+
+export interface CampaignNegotiationTokenPayload {
+  token: string;
+}
+
+export interface CampaignNegotiationUpdatedPayload {
+  summary: string;
+}
+
+export interface CampaignNegotiationServerToClientEvents {
+  campaign_negotiation_session_ready: (payload: { campaign_id: number }) => void;
+  campaign_negotiation_token: (payload: CampaignNegotiationTokenPayload) => void;
+  campaign_negotiation_updated: (payload: CampaignNegotiationUpdatedPayload) => void;
+  campaign_negotiation_done: () => void;
+  error: (payload: SocketErrorPayload) => void;
+}
+
+export interface CampaignNegotiationClientToServerEvents {
+  init_campaign_negotiation_session: (payload: { campaign_id: number }) => void;
+  campaign_negotiation_message: (payload: { content: string }) => void;
+}

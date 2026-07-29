@@ -17,9 +17,6 @@ const VectorMemoryEntryCard = ({
     onClick={onClick}
   >
     <span className="lore-entry-title">{entry.title}</span>
-    {entry.kind === "entity" && entry.entity_type && (
-      <span className="vm-entity-badge">{entry.entity_type}</span>
-    )}
   </button>
 );
 

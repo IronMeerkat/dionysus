@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from logging import getLogger
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -17,7 +17,7 @@ class Campaign(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
-    lore_world = Column(String, nullable=False, default=settings.PLACEHOLDER_LORE_WORLD)
+    world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False, index=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -27,6 +27,7 @@ class Campaign(Base):
     story_background = Column(Text, nullable=False, default="")
     contract = Column(JSONB, nullable=False, default=lambda: dict(settings.default_contract.model_dump()))
 
+    world = relationship("World", lazy="joined")
     conversations = relationship(
         "Conversation",
         back_populates="campaign",
@@ -41,6 +42,11 @@ class Campaign(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+
+    @property
+    def lore_world(self) -> str:
+        """🌍 Name of the campaign's lore world (read from the World row)."""
+        return self.world.name if self.world else ""
 
     @property
     def location(self) -> str:
@@ -59,9 +65,10 @@ class Campaign(Base):
         regardless of how the JSONB column is stored; missing dials show as
         ``(unset)`` rather than silently disappearing.
         """
-        contract = self.contract
+        contract = self.contract or {}
         lines = "\n".join(
-            f"  - {key}: {contract.get(key, '(unset)')}" for key in self.contract
+            f"  - {key}: {contract.get(key, '(unset)')}"
+            for key in settings.default_contract.model_dump()
         ) or "  (none)"
         return f"contract:\n{lines}"
 

@@ -23,7 +23,7 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
     if (!campaignId) navigate("/campaigns", { replace: true });
   }, [campaignId, navigate]);
 
-  const { players, characters, setPlayers, setCharacters } = useOptionsStore();
+  const { characters, setCharacters } = useOptionsStore();
   const { setPlayer, setCharacters: setSessionCharacters } = useSessionStore();
   const { setActiveConversation } = useConversationStore();
   const setMessages = useMessageStore((s) => s.setMessages);
@@ -49,11 +49,10 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
       try {
         const options = await restService.getOptions();
 
-        setPlayers(options.players);
         setCharacters(options.characters);
 
-        if (options.players.length === 1) {
-          setSelectedPlayerId(options.players[0].id);
+        if (options.characters.length === 1) {
+          setSelectedPlayerId(options.characters[0].id);
         }
         } catch (err) {
           console.error("❌ SessionSetup: fetch error", err);
@@ -91,7 +90,7 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
     setSubmitting(true);
     setError(null);
     await restService.setupSession(selectedPlayerId, Array.from(selectedCharacterIds), Number(campaignId)).then(response => {
-      setPlayer(players.find((p) => p.id === selectedPlayerId)!);
+      setPlayer(characters.find((c) => c.id === selectedPlayerId)!);
       setSessionCharacters(characters.filter((c) => selectedCharacterIds.has(c.id)));
       setActiveConversation(response.id, response.title);
       setMessages(response.messages.map((m) => ({
@@ -131,13 +130,24 @@ const SessionSetup = ({ sidebarOpen, onToggleSidebar }: SessionSetupProps) => {
           {error && <div className="session-setup-error">{error}</div>}
 
           <PlayerSelect
-            items={players}
+            items={characters}
             selectedId={selectedPlayerId}
-            onChange={setSelectedPlayerId}
+            onChange={(id) => {
+              setSelectedPlayerId(id);
+              // The PC can't also be in the scene as an NPC.
+              if (id !== null) {
+                setSelectedCharacterIds((prev) => {
+                  if (!prev.has(id)) return prev;
+                  const next = new Set(prev);
+                  next.delete(id);
+                  return next;
+                });
+              }
+            }}
           />
 
           <CharacterSelect
-            items={characters}
+            items={characters.filter((c) => c.id !== selectedPlayerId)}
             selectedIds={selectedCharacterIds}
             onToggle={toggleCharacter}
           />

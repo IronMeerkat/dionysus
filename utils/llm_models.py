@@ -44,9 +44,11 @@ npc_narration = ChatNanoGPT(**nanogpt)
 
 scene_change = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=128)) #ChatXAI(**xai, max_tokens=128)
 
-lore_creator = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
+# One model for every skill-driven tool agent (lore management, NPC building,
+# campaign admin); the differentiating behavior lives in SKILL.md files.
+skilled_agent_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
 
-# lore_creator = ChatNanoGPT(
+# skilled_agent_model = ChatNanoGPT(
 #     model="Qwen3.5-27B-BlueStar-Derestricted",
 #     temperature=0.8,
 #     presence_penalty=0.2,
@@ -54,11 +56,6 @@ lore_creator = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_eff
 # )
 
 memory_filter = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=1024)) #ChatXAI(**xai)
-
-npc_builder = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
-
-# --- Campaign Admin (out-of-character campaign configuration chat) ---
-campaign_admin = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
 
 
 dm_planner_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"}, max_tokens=2400)
@@ -72,7 +69,6 @@ dm_narrator_model = ChatNanoGPT(**nanogpt)
 dm_intent_model = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=512)) #ChatXAI(**xai_small)
 dm_continuity_model = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=512)) #ChatXAI(**xai_small)
 
-dm_referee_model = ChatNanoGPT(**_nano(reasoning_effort="high", max_tokens=1024)) #ChatXAI(**xai)
 dm_ooc_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
 dm_summarizer_model = ChatNanoGPT(**_nano(reasoning_effort="high", max_tokens=1024)) #ChatXAI(**xai)
 dm_faction_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})

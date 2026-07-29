@@ -3,9 +3,9 @@ import logging
 from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
 
-from database.models import Campaign, Conversation, WorldState
+from database.knowledge import get_world_id, wipe_campaign_memories
+from database.models import Campaign, WorldState
 from database.postgres_connection import session
-from database.graphiti_utils import wipe_campaign_memories
 from utils.prompts import placeholder_location, placeholder_scenario
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,11 @@ def create_campaign(
     if existing:
         raise HTTPException(status_code=409, detail=f"Campaign '{name}' already exists")
 
-    campaign = Campaign(name=name, lore_world=lore_world, story_background=placeholder_scenario)
+    world_id = get_world_id(lore_world.strip())
+    if world_id is None:
+        raise HTTPException(status_code=400, detail=f"Unknown lore world '{lore_world}'")
+
+    campaign = Campaign(name=name, world_id=world_id, story_background=placeholder_scenario)
     # Seed the 1:1 world state with a placeholder scene location; narrative
     # time starts empty and advances during play.
     campaign.world_state = WorldState(location=placeholder_location)
@@ -83,15 +87,15 @@ def create_campaign(
 
 
 @campaigns_router.delete("/{campaign_id}")
-async def delete_campaign(campaign_id: int) -> dict[str, str]:
+def delete_campaign(campaign_id: int) -> dict[str, str]:
     campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     try:
-        await wipe_campaign_memories(campaign_id)
+        wipe_campaign_memories(campaign_id)
     except Exception as exc:
-        logger.error(f"❌ Failed to wipe Graphiti memories for campaign {campaign_id}: {exc}")
+        logger.error(f"❌ Failed to wipe memories for campaign {campaign_id}: {exc}")
 
     campaign_name = campaign.name
     session.delete(campaign)

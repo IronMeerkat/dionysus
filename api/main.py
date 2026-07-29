@@ -13,12 +13,12 @@ from api.events import register_events
 from api.lore_events import register_lore_events
 from api.npc_builder_events import register_npc_builder_events
 from api.campaign_admin_events import register_campaign_admin_events
+from api.campaign_negotiation_events import register_campaign_negotiation_events
 from api.routes.routes import router
 from api.routes.session import session_router
 from api.routes.conversations import conversations_router
 from api.routes.lore import lore_router
-from api.routes.players import players_router
-from api.routes.npcs import npcs_router
+from api.routes.characters import characters_router
 from api.routes.campaigns import campaigns_router
 from api.routes.character_memories import character_memories_router
 
@@ -58,11 +58,11 @@ register_events(sio)
 register_lore_events(sio)
 register_npc_builder_events(sio)
 register_campaign_admin_events(sio)
+register_campaign_negotiation_events(sio)
 app.include_router(session_router)
 app.include_router(conversations_router)
 app.include_router(lore_router)
-app.include_router(players_router)
-app.include_router(npcs_router)
+app.include_router(characters_router)
 app.include_router(campaigns_router)
 app.include_router(character_memories_router)
 socket_app = socketio.ASGIApp(sio, other_asgi_app=app)

@@ -1,5 +1,5 @@
 interface PlayerSelectProps {
-  items: PlayerOption[];
+  items: CharacterOption[];
   selectedId: number | null;
   onChange: (id: number | null) => void;
 }
@@ -8,7 +8,7 @@ const PlayerSelect = ({ items, selectedId, onChange }: PlayerSelectProps) => {
   return (
     <div className="session-setup-section">
       <label className="session-setup-label" htmlFor="player-select">
-        Player
+        Player Character
       </label>
       <select
         id="player-select"
@@ -19,7 +19,7 @@ const PlayerSelect = ({ items, selectedId, onChange }: PlayerSelectProps) => {
         }
       >
         <option value="" disabled>
-          Choose a player...
+          Choose a player character...
         </option>
         {items.map((item) => (
           <option key={item.id} value={item.id}>

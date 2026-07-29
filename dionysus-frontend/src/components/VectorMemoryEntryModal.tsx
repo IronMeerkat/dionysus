@@ -7,17 +7,17 @@ interface VectorMemoryEntryModalProps {
   open: boolean;
   onClose: () => void;
   mode: "create" | "edit";
-  entryUuid: string | null;
+  entryId: number | null;
   api: VectorMemoryApi;
   onSaved: (entry: LoreEntryResponse) => void;
-  onDeleted: (uuid: string) => void;
+  onDeleted: (id: number) => void;
 }
 
 const VectorMemoryEntryModal = ({
   open,
   onClose,
   mode,
-  entryUuid,
+  entryId,
   api,
   onSaved,
   onDeleted,
@@ -27,8 +27,6 @@ const VectorMemoryEntryModal = ({
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [isEntity, setIsEntity] = useState(false);
-  const [entityType, setEntityType] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -37,21 +35,17 @@ const VectorMemoryEntryModal = ({
     setTitle("");
     setContent("");
     setFeedback(null);
-    setIsEntity(false);
-    setEntityType(null);
 
-    if (mode === "edit" && entryUuid) {
+    if (mode === "edit" && entryId !== null) {
       let cancelled = false;
       setLoading(true);
 
       api
-        .getEntry(entryUuid)
+        .getEntry(entryId)
         .then((full) => {
           if (!cancelled) {
             setTitle(full.title);
             setContent(full.content);
-            setIsEntity(full.kind === "entity");
-            setEntityType(full.entity_type ?? null);
           }
         })
         .catch((err) => {
@@ -66,7 +60,7 @@ const VectorMemoryEntryModal = ({
         cancelled = true;
       };
     }
-  }, [open, mode, entryUuid, api]);
+  }, [open, mode, entryId, api]);
 
   const closeModal = useCallback(() => {
     dialogRef.current?.close();
@@ -85,9 +79,9 @@ const VectorMemoryEntryModal = ({
       if (mode === "create") {
         const created = await api.createEntry(trimmedTitle, trimmedContent);
         onSaved(created);
-      } else if (entryUuid) {
+      } else if (entryId !== null) {
         const updated = await api.updateEntry(
-          entryUuid,
+          entryId,
           trimmedTitle,
           trimmedContent,
         );
@@ -100,18 +94,18 @@ const VectorMemoryEntryModal = ({
     } finally {
       setSubmitting(false);
     }
-  }, [title, content, mode, entryUuid, api, onSaved, closeModal]);
+  }, [title, content, mode, entryId, api, onSaved, closeModal]);
 
   const handleDelete = useCallback(async () => {
-    if (!entryUuid) return;
+    if (entryId === null) return;
     if (!confirm("Delete this entry?")) return;
 
     setSubmitting(true);
     setFeedback(null);
 
     try {
-      await api.deleteEntry(entryUuid);
-      onDeleted(entryUuid);
+      await api.deleteEntry(entryId);
+      onDeleted(entryId);
       closeModal();
     } catch (err) {
       console.error("❌ Failed to delete entry:", err);
@@ -119,7 +113,7 @@ const VectorMemoryEntryModal = ({
     } finally {
       setSubmitting(false);
     }
-  }, [entryUuid, api, onDeleted, closeModal]);
+  }, [entryId, api, onDeleted, closeModal]);
 
   if (!open) return null;
 
@@ -135,11 +129,7 @@ const VectorMemoryEntryModal = ({
     >
       <div className="modal-body">
         <h3 className="modal-title">
-          {isEntity
-            ? `Edit ${entityType ?? "Entity"}`
-            : mode === "create"
-              ? "New Entry"
-              : "Edit Entry"}
+          {mode === "create" ? "New Entry" : "Edit Entry"}
         </h3>
 
         <input
@@ -163,7 +153,7 @@ const VectorMemoryEntryModal = ({
         {feedback && <p className="modal-feedback">{feedback}</p>}
 
         <div className="modal-actions">
-          {mode === "edit" && entryUuid && (
+          {mode === "edit" && entryId !== null && (
             <button
               type="button"
               className="btn btn-sm btn-error mr-auto"

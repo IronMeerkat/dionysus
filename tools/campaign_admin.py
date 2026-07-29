@@ -12,27 +12,16 @@ from logging import getLogger
 
 from langchain.tools import tool
 
-from database.models import Campaign, CampaignNPC, Character, QuestThread
-from database.graphiti_utils import make_group_id, make_memory_group_id
-from database.graphiti_worlds import (
-    create_entry,
-    delete_entity,
-    delete_entry,
-    get_entity,
-    get_entry,
-    list_entries,
-    list_entities,
-    update_entity,
-    update_entry,
-)
-from database.init_graphiti import graphiti
+from database import knowledge
+from database.models import Campaign, CampaignParticipant, Character, CharacterMemory, QuestThread
 from database.postgres_connection import session
+from hephaestus.settings import settings
+from tools.mechanics import list_mechanics, render_mechanics
 from tools.participants import (
     apply_participant_state_update as _apply_participant_state_update,
-    ensure_campaign_npc as _ensure_campaign_npc,
-    get_campaign_npc as _get_campaign_npc,
-    render_npc_state as _render_npc_state,
-    render_player_state as _render_player_state,
+    ensure_campaign_participant as _ensure_campaign_participant,
+    get_campaign_participant as _get_campaign_participant,
+    render_participant_state as _render_participant_state,
 )
 from tools.world_state import (
     THREAD_ACTIONS,
@@ -48,18 +37,8 @@ from tools.world_state import (
 
 logger = getLogger(__name__)
 
-# The well-known story-contract dials (see settings.yaml default_contract).
-CONTRACT_KEYS = (
-    "tone",
-    "rules_strictness",
-    "lethality",
-    "humor",
-    "gore",
-    "romance",
-    "nsfw",
-    "railroading",
-    "player_agency",
-)
+# The well-known story-contract dials, in canonical order (settings.yaml default_contract).
+CONTRACT_KEYS = tuple(settings.default_contract.model_dump())
 
 
 # ------------------------------------------------------------------
@@ -79,6 +58,48 @@ def list_threads(campaign_id: int, include_closed: bool = False) -> list[QuestTh
     return query.order_by(QuestThread.created_at).all()
 
 
+def edit_story_background(campaign_id: int, story_background: str) -> str:
+    """📜 Replace a campaign's static story premise; returns a tool-ready message."""
+    background = story_background.strip()
+    if not background:
+        return "❌ story_background is empty, nothing updated."
+    campaign = get_campaign_row(campaign_id)
+    if campaign is None:
+        return f"❌ Campaign {campaign_id} not found."
+    campaign.story_background = background
+    session.add(campaign)
+    session.commit()
+    logger.info(f"📜 [campaign_admin] Updated story_background for campaign {campaign_id}")
+    return f"✅ Story background updated ({len(background)} chars)."
+
+
+def edit_contract(campaign_id: int, updates: dict[str, str]) -> str:
+    """📜 Merge known fields into a campaign's story contract; returns a message."""
+    campaign = get_campaign_row(campaign_id)
+    if campaign is None:
+        return f"❌ Campaign {campaign_id} not found."
+    contract = dict(campaign.contract or {})
+    applied: list[str] = []
+    ignored: list[str] = []
+    for key, value in (updates or {}).items():
+        if key in CONTRACT_KEYS:
+            contract[key] = str(value)
+            applied.append(key)
+        else:
+            ignored.append(key)
+    if not applied:
+        return f"❌ No valid contract fields. Known: {', '.join(CONTRACT_KEYS)}."
+    campaign.contract = contract
+    session.add(campaign)
+    session.commit()
+    logger.info(f"📜 [campaign_admin] Updated contract fields {applied} for campaign {campaign_id}")
+    parts = ", ".join(f"{key}={contract[key]}" for key in applied)
+    msg = f"✅ Contract updated: {parts}."
+    if ignored:
+        msg += f" Ignored unknown fields: {', '.join(ignored)}."
+    return msg
+
+
 def render_campaign_overview(campaign_id: int) -> str:
     """📋 Render the campaign's full current configuration as a prompt block.
 
@@ -89,13 +110,9 @@ def render_campaign_overview(campaign_id: int) -> str:
     if campaign is None:
         return f"❌ Campaign {campaign_id} not found."
 
-    contract = campaign.contract or {}
-    contract_lines = "\n".join(
-        f"  - {key}: {contract.get(key, '(unset)')}" for key in CONTRACT_KEYS
-    ) or "  (none)"
-
     threads_block = render_threads(list_threads(campaign_id, include_closed=False))
     clocks_block = render_clocks(_list_faction_clocks(campaign_id, include_finished=False))
+    mechanics_block = render_mechanics(list_mechanics(campaign_id))
 
     return (
         f"Campaign #{campaign.id}: {campaign.name}\n"
@@ -103,7 +120,8 @@ def render_campaign_overview(campaign_id: int) -> str:
         f"location: {campaign.location or '(unset)'}\n"
         f"world_clock: {campaign.world_clock or '(unset)'}\n\n"
         f"story_background:\n{campaign.story_background or '(empty)'}\n\n"
-        f"contract:\n{contract_lines}\n\n"
+        f"{campaign.render_contract()}\n\n"
+        f"mechanics documents:\n{mechanics_block}\n\n"
         f"open quest threads:\n{threads_block}\n\n"
         f"active faction clocks:\n{clocks_block}"
     )
@@ -137,17 +155,7 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         text). This is the elevator-pitch setup chosen at creation, not scene
         narration.
         """
-        background = story_background.strip()
-        if not background:
-            return "❌ story_background is empty, nothing updated."
-        campaign = get_campaign_row(campaign_id)
-        if campaign is None:
-            return f"❌ Campaign {campaign_id} not found."
-        campaign.story_background = background
-        session.add(campaign)
-        session.commit()
-        logger.info(f"📜 [campaign_admin] Updated story_background for campaign {campaign_id}")
-        return f"✅ Story background updated ({len(background)} chars)."
+        return edit_story_background(campaign_id, story_background)
 
     @tool
     async def update_contract(updates: dict[str, str]) -> str:
@@ -156,29 +164,7 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         gore, romance, nsfw, railroading, player_agency. Unknown fields are
         ignored and reported back.
         """
-        campaign = get_campaign_row(campaign_id)
-        if campaign is None:
-            return f"❌ Campaign {campaign_id} not found."
-        contract = dict(campaign.contract or {})
-        applied: list[str] = []
-        ignored: list[str] = []
-        for key, value in (updates or {}).items():
-            if key in CONTRACT_KEYS:
-                contract[key] = str(value)
-                applied.append(key)
-            else:
-                ignored.append(key)
-        if not applied:
-            return f"❌ No valid contract fields. Known: {', '.join(CONTRACT_KEYS)}."
-        campaign.contract = contract
-        session.add(campaign)
-        session.commit()
-        logger.info(f"📜 [campaign_admin] Updated contract fields {applied} for campaign {campaign_id}")
-        parts = ", ".join(f"{key}={contract[key]}" for key in applied)
-        msg = f"✅ Contract updated: {parts}."
-        if ignored:
-            msg += f" Ignored unknown fields: {', '.join(ignored)}."
-        return msg
+        return edit_contract(campaign_id, updates)
 
     @tool
     async def update_location(location: str) -> str:
@@ -272,9 +258,8 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
     @tool
     async def update_participant_state(
         name: str,
-        role: str,
         stats_set: dict[str, int] | None = None,
-        status_added: list[str] | None = None,
+        status_added: list[dict | str] | None = None,
         status_removed: list[str] | None = None,
         modifiers_set: dict[str, int] | None = None,
         notes: str | None = None,
@@ -282,26 +267,25 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         """Apply a structured patch to a participant's live mechanical state
         (stats, status effects, modifiers, freeform notes).
 
-        ``role`` must be 'player' or 'npc'. ``name`` is the participant's
-        character/player name. All other arguments are optional -- pass only
-        the fields you want to change:
+        ``name`` is the participant's character name (PC or NPC -- they share
+        one roster). All other arguments are optional -- pass only the fields
+        you want to change:
 
         - stats_set / modifiers_set: dicts merged by key (overwrite), e.g.
           {"hp": 8, "ac": 14}.
-        - status_added / status_removed: lists of condition strings, applied
-          with case-insensitive set semantics, e.g. ["poisoned"].
+        - status_added: conditions to add. Each entry is either a plain name
+          ("poisoned") or an object with mechanics:
+          {"name": "poisoned", "note": "venom coursing", "affects": "attack rolls",
+           "roll_modifier": -2, "advantage": "disadvantage"}.
+          Adding an existing name merges the mechanical keys into it.
+        - status_removed: list of condition names to remove, e.g. ["inspired"].
         - notes: freeform text; replaces the existing notes when provided.
 
         If the named participant is not in this campaign, nothing changes.
         """
-        normalized_role = role.strip().lower()
-        if normalized_role not in ("player", "npc"):
-            return f"❌ role must be 'player' or 'npc', got '{role}'."
-
         row = _apply_participant_state_update(
             campaign_id,
             name=name,
-            role=normalized_role,
             stats_set=stats_set,
             status_added=status_added,
             status_removed=status_removed,
@@ -309,13 +293,31 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
             notes=notes,
         )
         if row is None:
-            return f"❌ No {normalized_role} named '{name.strip()}' found in campaign {campaign_id}."
+            return f"❌ No character named '{name.strip()}' found in campaign {campaign_id}."
 
-        if normalized_role == "player":
-            rendered = _render_player_state(campaign_id, row.player_id)
-        else:
-            rendered = _render_npc_state(campaign_id, row.character_id, name.strip())
-        return f"✅ Updated {normalized_role} '{name.strip()}' state in campaign {campaign_id}:\n{rendered}"
+        rendered = _render_participant_state(campaign_id, row.character_id, name.strip())
+        return f"✅ Updated '{name.strip()}' state in campaign {campaign_id}:\n{rendered}"
+
+    @tool
+    async def list_participant_states() -> str:
+        """List every participant in this campaign with their live mechanical
+        state: stats, temporary status effects (with roll mechanics),
+        modifiers, and notes. Use this to monitor who has what condition
+        before changing anything.
+        """
+        rows = (
+            session.query(CampaignParticipant)
+            .filter(CampaignParticipant.campaign_id == campaign_id)
+            .all()
+        )
+        if not rows:
+            return "🔍 No participants tracked in this campaign yet."
+        blocks = []
+        for row in rows:
+            name = row.character.name if row.character else f"character {row.character_id}"
+            blocks.append(_render_participant_state(campaign_id, row.character_id, name))
+        logger.info(f"🎲 [campaign_admin] Listed {len(rows)} participant state(s) (campaign {campaign_id})")
+        return "\n\n".join(blocks)
 
     # ------------------------------------------------------------------
     # Character roster (pull from the Character table into this campaign)
@@ -343,8 +345,8 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
     async def add_npc_to_campaign(npc_name: str) -> str:
         """Pull a character from the database by exact name and introduce them
         into this campaign. If the character is not yet part of the campaign
-        (no tracked state row), a CampaignNPC entry is created for them so
-        they're on the campaign roster. If they're already in the campaign,
+        (no tracked state row), a CampaignParticipant entry is created for them
+        so they're on the campaign roster. If they're already in the campaign,
         nothing changes.
 
         Returns the character's name, current description, and whether they
@@ -361,12 +363,12 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
                 "Use list_characters to find valid names."
             )
 
-        existing = _get_campaign_npc(campaign_id, character.id)
+        existing = _get_campaign_participant(campaign_id, character.id)
         if existing is None:
-            _ensure_campaign_npc(campaign_id, character.id)
+            _ensure_campaign_participant(campaign_id, character.id)
             logger.info(
                 f"🎭 [campaign_admin] Introduced NPC '{name}' into campaign "
-                f"{campaign_id} (created CampaignNPC state row)"
+                f"{campaign_id} (created CampaignParticipant state row)"
             )
             status = f"newly added to campaign {campaign_id}"
         else:
@@ -380,27 +382,15 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         )
 
     # ------------------------------------------------------------------
-    # NPC memories (Graphiti)
+    # NPC memories (Postgres, via database.knowledge)
     # ------------------------------------------------------------------
     #
-    # NPC memories are episodes/entities in Graphiti under a per-campaign,
-    # per-character group_id (``memories--campaign_<id>_<name>``). These tools
-    # let the admin inspect and edit them with the same campaign scoping the
-    # other tools enforce: every mutation verifies the memory's group_id
-    # belongs to this campaign before touching it.
+    # NPC memories are CharacterMemory rows scoped by (campaign_id,
+    # character_id). Every mutation verifies the row's campaign_id before
+    # touching it, matching the scoping the other tools enforce.
 
-    _MEMORY_PREFIX = make_group_id("memories", f"campaign_{campaign_id}_")
-
-    def _owned_by_campaign(memory: dict[str, object]) -> bool:
-        gid = str(memory.get("group_id") or "")
-        return gid.startswith(_MEMORY_PREFIX)
-
-    async def _get_memory(memory_uuid: str) -> dict[str, object] | None:
-        """Fetch an episode or entity memory by UUID (episodes take precedence)."""
-        entry = await get_entry(memory_uuid)
-        if entry is not None:
-            return entry
-        return await get_entity(memory_uuid)
+    def _resolve_character(name: str) -> Character | None:
+        return session.query(Character).filter(Character.name == name.strip()).first()
 
     @tool
     async def list_campaign_npcs() -> str:
@@ -412,25 +402,20 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         names: set[str] = set()
         rows = (
             session.query(Character.name)
-            .join(CampaignNPC, CampaignNPC.character_id == Character.id)
-            .filter(CampaignNPC.campaign_id == campaign_id)
+            .join(CampaignParticipant, CampaignParticipant.character_id == Character.id)
+            .filter(CampaignParticipant.campaign_id == campaign_id)
             .all()
         )
         names.update(r[0] for r in rows if r[0])
 
-        try:
-            records, _, _ = await graphiti.driver.execute_query(
-                "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $prefix "
-                "WITH DISTINCT e.group_id AS gid RETURN collect(gid) AS gids",
-                params={"prefix": _MEMORY_PREFIX},
-            )
-            gids = records[0]["gids"] if records else []
-            for gid in gids:
-                name = gid[len(_MEMORY_PREFIX):].replace("_", " ")
-                if name:
-                    names.add(name)
-        except Exception:
-            logger.exception(f"❌ [campaign_admin] Failed to query NPC memory groups for campaign {campaign_id}")
+        memory_rows = (
+            session.query(Character.name)
+            .join(CharacterMemory, CharacterMemory.character_id == Character.id)
+            .filter(CharacterMemory.campaign_id == campaign_id)
+            .distinct()
+            .all()
+        )
+        names.update(r[0] for r in memory_rows if r[0])
 
         if not names:
             return f"(no NPCs found in campaign {campaign_id})"
@@ -439,51 +424,38 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
     @tool
     async def list_npc_memories(npc_name: str) -> str:
         """List all memories stored for an NPC in this campaign. Returns each
-        memory's UUID, title, kind (episode or entity type), and creation
-        time. Use the returned UUID to get, update, or delete a specific
-        memory.
+        memory's id, title, and creation time. Use the returned id to get,
+        update, or delete a specific memory.
         """
-        name = npc_name.strip()
-        if not name:
+        if not npc_name.strip():
             return "❌ npc_name is empty, nothing to list."
-        gid = make_memory_group_id(campaign_id, name)
-        episodes = await list_entries(gid)
-        entities = await list_entities(gid)
-        if not episodes and not entities:
-            return f"🔍 No memories found for NPC '{name}' in campaign {campaign_id}."
+        character = _resolve_character(npc_name)
+        if character is None:
+            return f"❌ No character named '{npc_name.strip()}' found in the database."
 
-        lines: list[str] = []
-        for e in episodes:
-            lines.append(
-                f"- [episode] uuid={e['uuid']} | title='{e['title']}' | created_at={e['created_at']}"
-            )
-        for ent in entities:
-            etype = ent.get("entity_type") or "Entity"
-            lines.append(
-                f"- [{etype}] uuid={ent['uuid']} | title='{ent['title']}' | created_at={ent['created_at']}"
-            )
+        memories = knowledge.list_memories(campaign_id, character.id)
+        if not memories:
+            return f"🔍 No memories found for NPC '{character.name}' in campaign {campaign_id}."
+
         logger.info(
-            f"🧠 [campaign_admin] Listed {len(episodes)} episodes + {len(entities)} entities "
-            f"for NPC '{name}' (campaign {campaign_id})"
+            f"🧠 [campaign_admin] Listed {len(memories)} memories "
+            f"for NPC '{character.name}' (campaign {campaign_id})"
         )
-        return "\n".join(lines)
+        return "\n".join(
+            f"- id={m['id']} | title='{m['title']}' | created_at={m['created_at']}"
+            for m in memories
+        )
 
     @tool
-    async def get_npc_memory(memory_uuid: str) -> str:
-        """Fetch the full content of a single NPC memory by UUID. Use this to
+    async def get_npc_memory(memory_id: int) -> str:
+        """Fetch the full content of a single NPC memory by id. Use this to
         review a memory before editing or deleting it. The memory must belong
         to an NPC in this campaign.
         """
-        memory = await _get_memory(memory_uuid)
+        memory = knowledge.get_memory(memory_id, campaign_id=campaign_id)
         if memory is None:
-            return f"❌ No memory found with uuid={memory_uuid}."
-        if not _owned_by_campaign(memory):
-            return f"❌ Memory {memory_uuid} does not belong to campaign {campaign_id}."
-
-        kind = (memory.get("entity_type") or "episode") if memory.get("kind") == "entity" else "episode"
-        title = memory.get("title", "")
-        content = memory.get("content", "")
-        return f"[{kind}] {title} (uuid={memory_uuid})\n\n{content}"
+            return f"❌ No memory with id={memory_id} in campaign {campaign_id}."
+        return f"{memory['title']} (id={memory_id})\n\n{memory['content']}"
 
     @tool
     async def create_npc_memory(npc_name: str, title: str, content: str) -> str:
@@ -491,11 +463,10 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         backstory, relationships, or other knowledge the NPC should recall.
 
         The NPC must already exist as a character -- create the NPC (e.g.
-        via play) before adding memories. The memory is stored in this
-        campaign's memory graph for that NPC, so it is scoped to this
+        via play) before adding memories. The memory is scoped to this
         campaign and won't leak into others.
 
-        Returns the new memory's UUID, which you can pass to
+        Returns the new memory's id, which you can pass to
         update_npc_memory or delete_npc_memory later.
         """
         name = npc_name.strip()
@@ -508,47 +479,34 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         if not body:
             return "❌ content is empty, nothing to create."
 
-        character = session.query(Character).filter(Character.name == name).first()
+        character = _resolve_character(name)
         if character is None:
             return (
                 f"❌ No character named '{name}' found in the database; "
                 "create the NPC before adding memories."
             )
 
-        gid = make_memory_group_id(campaign_id, name)
         try:
-            entry = await create_entry(gid, clean_title, body, source_description=f"campaign_admin:{name}")
+            memory = await knowledge.save_memory(campaign_id, character.id, clean_title, body)
         except Exception as e:
             logger.exception(f"❌ [campaign_admin] Failed to create memory for NPC '{name}' (campaign {campaign_id})")
             return f"❌ Failed to create memory: {e}"
 
         logger.info(
             f"🧠 [campaign_admin] Created memory '{clean_title}' for NPC '{name}' "
-            f"(uuid={entry['uuid']}, campaign {campaign_id})"
+            f"(id={memory['id']}, campaign {campaign_id})"
         )
-        return (
-            f"✅ Created memory '{entry['title']}' (uuid={entry['uuid']}) "
-            f"for NPC '{name}' in campaign {campaign_id}."
-        )
+        return f"✅ Created memory '{memory['title']}' (id={memory['id']}) for NPC '{name}' in campaign {campaign_id}."
 
     @tool
     async def update_npc_memory(
-        memory_uuid: str, title: str | None = None, content: str | None = None
+        memory_id: int, title: str | None = None, content: str | None = None
     ) -> str:
         """Modify an existing NPC memory's title and/or content. Provide only
         the field(s) you want to change; the other is preserved. The memory
-        must belong to an NPC in this campaign.
-
-        Updating an episode memory re-creates it (Graphiti assigns a new
-        UUID), so use the UUID returned here for any subsequent references.
-        Entity memories keep their UUID.
+        keeps its id and must belong to an NPC in this campaign.
         """
         try:
-            existing = await _get_memory(memory_uuid)
-            if existing is None:
-                return f"❌ No memory found with uuid={memory_uuid}."
-            if not _owned_by_campaign(existing):
-                return f"❌ Memory {memory_uuid} does not belong to campaign {campaign_id}."
             if title is None and content is None:
                 return "❌ Nothing to update: provide a new title and/or content."
             if content is not None:
@@ -556,50 +514,34 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
                 if not content:
                     return "❌ Failed to update memory: content is empty."
 
-            is_entity = existing.get("kind") == "entity"
-            if is_entity:
-                result = await update_entity(memory_uuid, name=title, summary=content)
-            else:
-                result = await update_entry(memory_uuid, title=title, content=content)
-            if result is None:
-                return f"❌ Failed to update memory {memory_uuid}."
-
-            new_uuid = str(result["uuid"])
-            note = "" if new_uuid == memory_uuid else f" (new uuid={new_uuid})"
-            logger.info(
-                f"✏️ [campaign_admin] Updated NPC memory '{existing['title']}' "
-                f"(uuid={memory_uuid} -> {new_uuid}, campaign {campaign_id})"
+            result = await knowledge.update_memory(
+                memory_id, title=title, content=content, campaign_id=campaign_id,
             )
-            return f"✅ Updated memory '{result['title']}'{note} in campaign {campaign_id}."
+            if result is None:
+                return f"❌ No memory with id={memory_id} in campaign {campaign_id}."
+            logger.info(
+                f"✏️ [campaign_admin] Updated NPC memory '{result['title']}' "
+                f"(id={memory_id}, campaign {campaign_id})"
+            )
+            return f"✅ Updated memory '{result['title']}' (id={memory_id}) in campaign {campaign_id}."
         except Exception as e:
-            logger.exception(f"❌ [campaign_admin] Failed to update memory {memory_uuid}")
+            logger.exception(f"❌ [campaign_admin] Failed to update memory {memory_id}")
             return f"❌ Failed to update memory: {e}"
 
     @tool
-    async def delete_npc_memory(memory_uuid: str) -> str:
-        """Permanently delete an NPC memory by UUID. The memory must belong to
-        an NPC in this campaign. Works on both episode memories and entity
-        memories.
+    async def delete_npc_memory(memory_id: int) -> str:
+        """Permanently delete an NPC memory by id. The memory must belong to
+        an NPC in this campaign.
         """
         try:
-            existing = await _get_memory(memory_uuid)
-            if existing is None:
-                return f"❌ No memory found with uuid={memory_uuid}."
-            if not _owned_by_campaign(existing):
-                return f"❌ Memory {memory_uuid} does not belong to campaign {campaign_id}."
-
-            is_entity = existing.get("kind") == "entity"
-            deleted = await (delete_entity(memory_uuid) if is_entity else delete_entry(memory_uuid))
-            if not deleted:
-                return f"❌ Failed to delete memory {memory_uuid}."
-
+            if not knowledge.delete_memory(memory_id, campaign_id=campaign_id):
+                return f"❌ No memory with id={memory_id} in campaign {campaign_id}."
             logger.info(
-                f"🗑️ [campaign_admin] Deleted NPC memory '{existing['title']}' "
-                f"(uuid={memory_uuid}, campaign {campaign_id})"
+                f"🗑️ [campaign_admin] Deleted NPC memory id={memory_id} (campaign {campaign_id})"
             )
-            return f"✅ Deleted memory '{existing['title']}' (uuid={memory_uuid}) from campaign {campaign_id}."
+            return f"✅ Deleted memory id={memory_id} from campaign {campaign_id}."
         except Exception as e:
-            logger.exception(f"❌ [campaign_admin] Failed to delete memory {memory_uuid}")
+            logger.exception(f"❌ [campaign_admin] Failed to delete memory {memory_id}")
             return f"❌ Failed to delete memory: {e}"
 
     return [

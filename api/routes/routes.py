@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Path, Query
 from fastapi.exceptions import HTTPException
 
-from database.models import Character, Player, Message
+from database.models import Character, Message
 from database.models.conversation import Conversation
 from database.postgres_connection import session
 from tools.world_state import ensure_world_state, get_world_state
@@ -12,12 +12,6 @@ from tools.world_state import ensure_world_state, get_world_state
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-@router.get("/players")
-def get_players() -> list[dict[str, object]]:
-    players = session.query(Player.id, Player.name).order_by(Player.id.asc()).all()
-    return [{"id": p.id, "name": p.name} for p in players]
 
 
 @router.get("/characters")

@@ -42,14 +42,14 @@ const CharacterMemories = () => {
     () => ({
       getEntries: () =>
         restService.getCharacterMemoryEntries(cid, nid),
-      getEntry: (uuid: string) =>
-        restService.getCharacterMemoryEntry(uuid),
+      getEntry: (id: number) =>
+        restService.getCharacterMemoryEntry(id),
       createEntry: (title: string, content: string) =>
         restService.createCharacterMemoryEntry(cid, nid, title, content),
-      updateEntry: (uuid: string, title: string, content: string) =>
-        restService.updateCharacterMemoryEntry(uuid, title, content),
-      deleteEntry: (uuid: string) =>
-        restService.deleteCharacterMemoryEntry(uuid),
+      updateEntry: (id: number, title: string, content: string) =>
+        restService.updateCharacterMemoryEntry(id, title, content),
+      deleteEntry: (id: number) =>
+        restService.deleteCharacterMemoryEntry(id),
     }),
     [cid, nid],
   );

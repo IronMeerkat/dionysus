@@ -1,0 +1,74 @@
+@reference "../index.css";
+
+.campaign-negotiation-page {
+  @apply flex flex-1 justify-center overflow-hidden px-4 py-4;
+}
+
+.campaign-negotiation-container {
+  @apply flex w-full max-w-3xl flex-col;
+  height: 100%;
+}
+
+.campaign-negotiation-header {
+  @apply flex items-center gap-4 border-b border-base-content/10 pb-3;
+}
+
+.campaign-negotiation-title {
+  @apply flex-1 text-lg font-bold text-base-content;
+}
+
+.campaign-negotiation-status {
+  @apply text-xs font-medium;
+}
+
+.campaign-negotiation-status.online {
+  @apply text-success;
+}
+
+.campaign-negotiation-status.offline {
+  @apply text-base-content/40;
+}
+
+.campaign-negotiation-error {
+  @apply mt-2 rounded-lg bg-error/10 px-4 py-2 text-sm text-error;
+}
+
+.campaign-negotiation-messages {
+  @apply flex flex-1 flex-col gap-3 overflow-y-auto py-4;
+}
+
+.campaign-negotiation-empty {
+  @apply py-12 text-center text-sm text-base-content/40;
+}
+
+.campaign-negotiation-bubble {
+  @apply max-w-[85%] rounded-xl px-4 py-3;
+}
+
+.campaign-negotiation-bubble.user {
+  @apply self-end bg-primary/15 text-base-content;
+}
+
+.campaign-negotiation-bubble.assistant {
+  @apply self-start border border-base-content/10 bg-base-200 text-base-content;
+}
+
+.campaign-negotiation-role {
+  @apply mb-1 block text-xs font-semibold text-base-content/50;
+}
+
+.campaign-negotiation-content {
+  @apply whitespace-pre-wrap text-sm leading-relaxed;
+}
+
+.campaign-negotiation-updated {
+  @apply self-start rounded-lg bg-success/10 px-4 py-2 text-xs font-medium text-success;
+}
+
+.campaign-negotiation-input-bar {
+  @apply flex items-end gap-2 border-t border-base-content/10 pt-3;
+}
+
+.campaign-negotiation-textarea {
+  @apply flex-1 resize-none;
+}

@@ -4,7 +4,7 @@ import socketio
 from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage, ToolMessage, ToolMessageChunk
 from langchain_core.runnables import RunnableConfig
 
-from agents.campaign_admin import spawn_campaign_admin
+from agents.skilled_agent import spawn_skilled_agent
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,12 @@ def register_campaign_admin_events(sio: socketio.AsyncServer) -> None:
             return
 
         try:
-            graph = spawn_campaign_admin(campaign_id_int)
+            graph = spawn_skilled_agent(
+                ["campaign-admin"],
+                active=["campaign-admin"],
+                campaign_id=campaign_id_int,
+                name="campaign_admin",
+            )
             await sio.save_session(sid, {
                 "graph": graph,
                 "campaign_id": campaign_id_int,
@@ -104,7 +109,7 @@ def register_campaign_admin_events(sio: socketio.AsyncServer) -> None:
 
         try:
             stream = graph.astream(
-                {"messages": list(history), "campaign_id": campaign_id},
+                {"messages": list(history)},
                 stream_mode="messages",
                 config=config,
                 subgraphs=True,
@@ -114,7 +119,7 @@ def register_campaign_admin_events(sio: socketio.AsyncServer) -> None:
                 namespace_tuple, (msg, metadata) = item
                 langgraph_node = metadata.get("langgraph_node", "")
 
-                if isinstance(msg, AIMessageChunk) and langgraph_node == "agent":
+                if isinstance(msg, AIMessageChunk) and langgraph_node in ("agent", "model"):
                     if msg.content:
                         token = str(msg.content)
                         collected_text += token

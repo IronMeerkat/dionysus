@@ -1,60 +1,30 @@
-"""Intent routing: classify the player's message and answer OOC questions."""
+"""Intent routing: OOC branch predicate and the out-of-character responder.
+
+The intent classifier itself lives in ``agents.dungeon_master.classifiers``
+(it is skill-driven); this module keeps the routing predicate and the OOC
+answer node.
+"""
 from logging import getLogger
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage
 
 from agents.dungeon_master.context import DMContext
-from agents.dungeon_master.schemas import NARRATOR_NAME, DungeonMasterState, IntentReading
-from utils.llm_models import dm_intent_model, dm_ooc_model
-from utils.prompts import dm_intent_router_prompt_template, dm_ooc_responder_prompt_template
+from agents.dungeon_master.schemas import NARRATOR_NAME, DungeonMasterState
+from utils.llm_models import dm_ooc_model
+from utils.prompts import dm_ooc_responder_prompt_template
 
 logger = getLogger(__name__)
 
 # Intent types that bypass the story pipeline and get a direct DM answer.
 OOC_INTENTS = frozenset({"ooc_question", "rules_question", "meta"})
 
-# How much recent conversation the cheap classifier hops get to see.
-ROUTER_CONTEXT_WINDOW = 12
-
-
-def make_intent_router(ctx: DMContext):
-    intent_llm = dm_intent_model.with_structured_output(IntentReading, strict=True)
-
-    async def intent_router(state: DungeonMasterState) -> dict:
-        """🧭 Classify the player's latest message: what do they want this turn?"""
-        prompt = await dm_intent_router_prompt_template.ainvoke({
-            "player_name": ctx.player.name,
-            "location": ctx.location,
-            "world_clock": ctx.world_clock,
-            "active_npcs": ctx.npc_names,
-            "player_state": state.player_state,
-            "messages": ctx.combined_messages(state, limit=ROUTER_CONTEXT_WINDOW),
-        })
-        try:
-            reading: IntentReading = await intent_llm.ainvoke(prompt)
-        except Exception:
-            logger.exception("💥 Intent router failed, defaulting to in-character dialogue")
-            reading = IntentReading(
-                intent_type="dialogue",
-                scene_mode="social",
-                needs_adjudication=False,
-                summary=ctx.last_human_query(state, fallback="(unreadable intent)")[:200],
-            )
-        logger.info(
-            f"🧭 Intent: {reading.intent_type} / {reading.scene_mode} "
-            f"(adjudicate={reading.needs_adjudication}) -- {reading.summary[:120]}"
-        )
-        return {"messages": [], "intent": reading}
-
-    return intent_router
-
 
 def route_intent(state: DungeonMasterState) -> str:
     if state.intent and state.intent.intent_type in OOC_INTENTS:
         logger.info("🎙️ OOC short-circuit: answering the player directly, no story turn")
         return "ooc_responder"
-    return "rules_referee"
+    return "dm_planner"
 
 
 def make_ooc_responder(ctx: DMContext):

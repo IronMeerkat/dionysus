@@ -155,7 +155,7 @@ const NPCBuilderChat = () => {
             <button
               type="button"
               className="btn btn-sm btn-outline"
-              onClick={() => navigate("/npcs")}
+              onClick={() => navigate("/characters")}
             >
               Back to NPCs
             </button>
@@ -215,7 +215,7 @@ const NPCBuilderChat = () => {
           <button
             type="button"
             className="btn btn-sm btn-outline"
-            onClick={() => navigate("/npcs")}
+            onClick={() => navigate("/characters")}
           >
             Back to NPCs
           </button>

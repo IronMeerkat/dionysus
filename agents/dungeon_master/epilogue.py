@@ -3,19 +3,23 @@
 Nothing here blocks the player's turn -- the node snapshots what it needs,
 schedules background work, and returns immediately.
 """
+import asyncio
 from logging import getLogger
 
 from langchain_core.messages import AnyMessage
-from pydantic import BaseModel, Field
 
+from agents.dungeon_master.classifiers import run_classifier
 from agents.dungeon_master.context import DMContext
-from agents.dungeon_master.schemas import DMPlan, DungeonMasterState, FactionSimulation, SceneSummary
-from database.graphiti_utils import (
-    fire_and_forget,
-    save_player_preferences,
-    save_secret_notes,
-    save_world_events,
+from agents.dungeon_master.schemas import (
+    DMPlan,
+    DungeonMasterState,
+    FactionSimulation,
+    SceneChangeReport,
+    SceneSummary,
 )
+from database.knowledge import save_stream_items
+from database.models import DMSecret, PlayerPreference, WorldEvent
+from tools.mechanics import get_mechanic, upsert_mechanic
 from tools.world_state import (
     advance_faction_clock,
     create_faction_clock,
@@ -23,13 +27,15 @@ from tools.world_state import (
     list_open_threads,
     render_clocks,
     render_threads,
+    set_location,
+    set_world_clock,
 )
 from utils.llm_models import dm_faction_model, dm_summarizer_model, scene_change
 from utils.prompts import (
     dm_faction_prompt_template,
     dm_scene_summarizer_prompt_template,
-    scene_change_prompt_template,
 )
+from utils.tasks import fire_and_forget
 
 logger = getLogger(__name__)
 
@@ -41,27 +47,70 @@ MAX_TURNS_BETWEEN_SUMMARIES = 10
 SCENE_WINDOW = 30
 
 
-class SceneChanged(BaseModel):
-    """Verdict of the scene-change detector."""
-    changed: bool = Field(description=(
-        "True when the conversation indicates a scene change: time skip, new "
-        "location, new setting, or events that clearly end the current scene."))
-
-
 def _render_transcript(messages: list[AnyMessage]) -> str:
     lines = [f"{m.name or m.type}: {m.content}" for m in messages if m.content]
     return "\n".join(lines[-SCENE_WINDOW:])
 
 
 def make_turn_epilogue(ctx: DMContext):
-    scene_change_llm = scene_change.with_structured_output(SceneChanged, strict=True)
     summarizer_llm = dm_summarizer_model.with_structured_output(SceneSummary, strict=True)
     faction_llm = dm_faction_model.with_structured_output(FactionSimulation, strict=True)
 
-    async def _detect_scene_change(recent: list[AnyMessage]) -> bool:
-        prompt = await scene_change_prompt_template.ainvoke({"messages": recent[-SCENE_WINDOW:]})
-        verdict: SceneChanged = await scene_change_llm.ainvoke(prompt)
-        return verdict.changed
+    async def _run_scene_change_check(recent: list[AnyMessage]) -> SceneChangeReport | None:
+        """🧭 Ask the scene-change detector for a verdict plus state consequences."""
+        mechanics_docs = await asyncio.to_thread(lambda: ctx.mechanics)
+        report = await run_classifier(
+            "dm-scene-change",
+            SceneChangeReport,
+            scene_change,
+            {
+                "location": ctx.location,
+                "world_clock": ctx.world_clock,
+                "mechanics_docs": mechanics_docs or "(no negotiated mechanics documents)",
+                "messages": recent[-SCENE_WINDOW:],
+            },
+            fallback=None,
+            label="scene_change",
+        )
+        if report is not None:
+            logger.info(
+                f"🧭 Scene-change report: changed={report.changed}, "
+                f"{len(report.mechanics_updates)} mechanics update(s) -- {report.reason[:120]}"
+            )
+        return report
+
+    async def _apply_scene_change_report(report: SceneChangeReport) -> None:
+        """📌 Persist the detector's state consequences through deterministic writes.
+
+        Mechanics updates are applied only for documents that already exist --
+        the detector reconciles negotiated systems, it can never invent new ones.
+        """
+        if report.location:
+            try:
+                await asyncio.to_thread(set_location, ctx.campaign.id, report.location)
+            except Exception:
+                logger.exception(f"💥 Failed to apply scene-change location '{report.location}'")
+        if report.world_clock:
+            try:
+                await asyncio.to_thread(set_world_clock, ctx.campaign.id, report.world_clock)
+            except Exception:
+                logger.exception(f"💥 Failed to apply scene-change world clock '{report.world_clock}'")
+        applied: list[str] = []
+        for update in report.mechanics_updates:
+            try:
+                existing = await asyncio.to_thread(get_mechanic, ctx.campaign.id, update.title)
+                if existing is None:
+                    logger.warning(
+                        f"⚠️ Scene-change updater named unknown mechanics doc "
+                        f"'{update.title}', skipping"
+                    )
+                    continue
+                await asyncio.to_thread(upsert_mechanic, ctx.campaign.id, update.title, update.content)
+                applied.append(existing.title)
+            except Exception:
+                logger.exception(f"💥 Failed to update mechanics doc '{update.title}'")
+        if applied:
+            logger.info(f"⚙️ Scene-change updater revised mechanics doc(s): {', '.join(applied)}")
 
     async def _run_scene_summary(transcript: str) -> None:
         """🧾 Distill the scene into world events and player preferences."""
@@ -78,15 +127,9 @@ def make_turn_epilogue(ctx: DMContext):
         events.extend(summary.canon_updates)
         events.extend(summary.npc_updates)
         events.extend(f"Unresolved hook: {hook}" for hook in summary.unresolved_hooks)
-        await save_world_events(
-            events=events, campaign_id=ctx.campaign.id, lore_world=ctx.campaign.lore_world,
-        )
+        await save_stream_items(WorldEvent, ctx.campaign.id, events)
         if summary.player_preferences:
-            await save_player_preferences(
-                notes=summary.player_preferences,
-                campaign_id=ctx.campaign.id,
-                lore_world=ctx.campaign.lore_world,
-            )
+            await save_stream_items(PlayerPreference, ctx.campaign.id, [summary.player_preferences])
         logger.info(
             f"🧾 Scene summarized: {len(summary.canon_updates)} canon update(s), "
             f"{len(summary.unresolved_hooks)} hook(s)"
@@ -119,15 +162,9 @@ def make_turn_epilogue(ctx: DMContext):
                 ticks_max=new_clock.ticks_max, next_move=new_clock.next_move,
             )
         if sim.world_events:
-            await save_world_events(
-                events=sim.world_events, campaign_id=ctx.campaign.id,
-                lore_world=ctx.campaign.lore_world,
-            )
+            await save_stream_items(WorldEvent, ctx.campaign.id, sim.world_events)
         if sim.secret_notes:
-            await save_secret_notes(
-                notes=sim.secret_notes, campaign_id=ctx.campaign.id,
-                lore_world=ctx.campaign.lore_world,
-            )
+            await save_stream_items(DMSecret, ctx.campaign.id, [sim.secret_notes])
         logger.info(
             f"🌒 Faction simulation: {len(sim.clock_advances)} tick(s), "
             f"{len(sim.new_clocks)} new clock(s), {len(sim.world_events)} event(s)"
@@ -144,14 +181,23 @@ def make_turn_epilogue(ctx: DMContext):
         turns_since_summary: int,
     ) -> None:
         scene_ended = bool(plan.time_location_update or plan.world_clock_update)
+
+        # The detector runs only when the DM flagged mechanics movement or the
+        # summary cadence wants a verdict -- never on ordinary turns.
+        report: SceneChangeReport | None = None
+        if plan.mechanics_moved or (not scene_ended and turns_since_summary >= MIN_TURNS_BEFORE_CHECK):
+            try:
+                report = await _run_scene_change_check(recent)
+            except Exception:
+                logger.exception("💥 Scene-change detection failed, skipping its updates this turn")
+            if report is not None:
+                await _apply_scene_change_report(report)
+
         if not scene_ended and turns_since_summary >= MAX_TURNS_BETWEEN_SUMMARIES:
             scene_ended = True
             logger.info(f"🧾 {turns_since_summary} turns since last summary, forcing one")
-        elif not scene_ended and turns_since_summary >= MIN_TURNS_BEFORE_CHECK:
-            try:
-                scene_ended = await _detect_scene_change(recent)
-            except Exception:
-                logger.exception("💥 Scene-change detection failed, skipping summary this turn")
+        elif not scene_ended and report is not None:
+            scene_ended = report.changed
 
         if scene_ended:
             try:

@@ -1,0 +1,13 @@
+@reference "../index.css";
+
+.status-effect-modal-body {
+  @apply flex flex-col gap-3;
+}
+
+.se-field {
+  @apply flex flex-col gap-1 text-sm font-semibold;
+}
+
+.se-field-row {
+  @apply grid grid-cols-2 gap-3;
+}

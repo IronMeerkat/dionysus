@@ -30,11 +30,16 @@ interface EntityManagerProps {
   entityLabel: string;
   api: EntityManagerApi;
   extraActions?: React.ReactNode;
+  renderExtras?: (
+    detail: EntityDetailResponse,
+    refresh: () => Promise<void>,
+  ) => React.ReactNode;
 }
 
-const EntityManager = ({ title, entityLabel, api, extraActions }: EntityManagerProps) => {
+const EntityManager = ({ title, entityLabel, api, extraActions, renderExtras }: EntityManagerProps) => {
   const [entities, setEntities] = useState<EntityListItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<EntityDetailResponse | null>(null);
   const [descriptions, setDescriptions] = useState<DescriptionVersion[]>([]);
 
   const [editorMode, setEditorMode] = useState<EditorMode>("idle");
@@ -59,10 +64,22 @@ const EntityManager = ({ title, entityLabel, api, extraActions }: EntityManagerP
   const resetEditor = useCallback(() => {
     setEditorMode("idle");
     setSelectedId(null);
+    setSelectedDetail(null);
     setDraft(EMPTY_DRAFT);
     setDescriptions([]);
     setOriginalName("");
   }, []);
+
+  const refreshDetail = useCallback(async () => {
+    if (selectedId === null) return;
+    try {
+      const detail = await api.get(selectedId);
+      setSelectedDetail(detail);
+      setDescriptions(detail.descriptions);
+    } catch (err) {
+      console.error(`❌ Failed to refresh ${entityLabel}`, err);
+    }
+  }, [selectedId, api, entityLabel]);
 
   const handleSelect = useCallback(
     async (id: number) => {
@@ -70,6 +87,7 @@ const EntityManager = ({ title, entityLabel, api, extraActions }: EntityManagerP
       try {
         const detail = await api.get(id);
         setSelectedId(detail.id);
+        setSelectedDetail(detail);
         setOriginalName(detail.name);
         const latestBody =
           detail.descriptions.length > 0
@@ -121,6 +139,7 @@ const EntityManager = ({ title, entityLabel, api, extraActions }: EntityManagerP
           },
         ]);
         setSelectedId(created.id);
+        setSelectedDetail(created);
         setOriginalName(created.name);
         setDescriptions(created.descriptions);
         setEditorMode("edit");
@@ -145,6 +164,7 @@ const EntityManager = ({ title, entityLabel, api, extraActions }: EntityManagerP
         }
 
         if (updated) {
+          setSelectedDetail(updated);
           setOriginalName(updated.name);
           setDescriptions(updated.descriptions);
           const latestDesc =
@@ -339,6 +359,11 @@ const EntityManager = ({ title, entityLabel, api, extraActions }: EntityManagerP
             </div>
           </div>
         )}
+
+        {/* ---- Extra detail sections (e.g. status effects) ---- */}
+        {editorMode === "edit" &&
+          selectedDetail &&
+          renderExtras?.(selectedDetail, refreshDetail)}
 
         {/* ---- Description History ---- */}
         {editorMode === "edit" && descriptions.length > 0 && (

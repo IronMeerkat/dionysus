@@ -11,6 +11,8 @@ import type {
   LoreEntryResponse,
   EntityListItem,
   EntityDetailResponse,
+  CharacterStatusEffect,
+  StatusEffectPayload,
   CampaignListItem,
   CampaignDetailResponse,
 } from "../types/rest";
@@ -56,10 +58,6 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 }
 
 export const restService = {
-  getPlayers(): Promise<PlayerOption[]> {
-    return request<PlayerOption[]>("/players");
-  },
-
   getCharacters(): Promise<CharacterOption[]> {
     return request<CharacterOption[]>("/characters");
   },
@@ -152,8 +150,8 @@ export const restService = {
     return request<LoreEntryListItem[]>(`/lore/worlds/${encodeURIComponent(worldName)}/entries`);
   },
 
-  getEntry(uuid: string): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/lore/entries/${uuid}`);
+  getEntry(id: number): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/entries/${id}`);
   },
 
   createEntry(worldName: string, title: string, content: string): Promise<LoreEntryResponse> {
@@ -163,89 +161,81 @@ export const restService = {
     });
   },
 
-  updateEntry(uuid: string, title: string, content: string): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/lore/entries/${uuid}`, {
+  updateEntry(id: number, title: string, content: string): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/lore/entries/${id}`, {
       method: "PUT",
       body: { title, content },
     });
   },
 
-  deleteEntry(uuid: string): Promise<MessageResponse> {
-    return request<MessageResponse>(`/lore/entries/${uuid}`, {
+  deleteEntry(id: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/lore/entries/${id}`, {
       method: "DELETE",
     });
   },
 
-  // ---- Players ----
+  // ---- Characters ----
 
-  getPlayerList(): Promise<EntityListItem[]> {
-    return request<EntityListItem[]>("/players/");
+  getCharacterList(): Promise<EntityListItem[]> {
+    return request<EntityListItem[]>("/characters/");
   },
 
-  getPlayer(playerId: number): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>(`/players/${playerId}`);
+  getCharacter(characterId: number): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/characters/${characterId}`);
   },
 
-  createPlayer(name: string, description: string): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>("/players/", {
+  createCharacter(name: string, description: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>("/characters/", {
       method: "POST",
       body: { name, description },
     });
   },
 
-  updatePlayerName(playerId: number, name: string): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>(`/players/${playerId}`, {
+  updateCharacterName(characterId: number, name: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/characters/${characterId}`, {
       method: "PUT",
       body: { name },
     });
   },
 
-  addPlayerDescription(playerId: number, body: string): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>(`/players/${playerId}/description`, {
+  addCharacterDescription(characterId: number, body: string): Promise<EntityDetailResponse> {
+    return request<EntityDetailResponse>(`/characters/${characterId}/description`, {
       method: "POST",
       body: { body },
     });
   },
 
-  deletePlayer(playerId: number): Promise<MessageResponse> {
-    return request<MessageResponse>(`/players/${playerId}`, {
+  deleteCharacter(characterId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/characters/${characterId}`, {
       method: "DELETE",
     });
   },
 
-  // ---- NPCs ----
+  // ---- Character Status Effects ----
 
-  getNpcList(): Promise<EntityListItem[]> {
-    return request<EntityListItem[]>("/npcs/");
-  },
-
-  getNpc(npcId: number): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>(`/npcs/${npcId}`);
-  },
-
-  createNpc(name: string, description: string): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>("/npcs/", {
+  createStatusEffect(
+    characterId: number,
+    payload: StatusEffectPayload,
+  ): Promise<CharacterStatusEffect> {
+    return request<CharacterStatusEffect>(`/characters/${characterId}/status_effects`, {
       method: "POST",
-      body: { name, description },
+      body: { ...payload },
     });
   },
 
-  updateNpcName(npcId: number, name: string): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>(`/npcs/${npcId}`, {
+  updateStatusEffect(
+    characterId: number,
+    effectId: number,
+    payload: StatusEffectPayload,
+  ): Promise<CharacterStatusEffect> {
+    return request<CharacterStatusEffect>(`/characters/${characterId}/status_effects/${effectId}`, {
       method: "PUT",
-      body: { name },
+      body: { ...payload },
     });
   },
 
-  addNpcDescription(npcId: number, body: string): Promise<EntityDetailResponse> {
-    return request<EntityDetailResponse>(`/npcs/${npcId}/description`, {
-      method: "POST",
-      body: { body },
-    });
-  },
-
-  deleteNpc(npcId: number): Promise<MessageResponse> {
-    return request<MessageResponse>(`/npcs/${npcId}`, {
+  deleteStatusEffect(characterId: number, effectId: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/characters/${characterId}/status_effects/${effectId}`, {
       method: "DELETE",
     });
   },
@@ -287,8 +277,8 @@ export const restService = {
     );
   },
 
-  getCharacterMemoryEntry(uuid: string): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/character-memories/entries/${uuid}`);
+  getCharacterMemoryEntry(id: number): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/character-memories/entries/${id}`);
   },
 
   createCharacterMemoryEntry(
@@ -303,15 +293,15 @@ export const restService = {
     );
   },
 
-  updateCharacterMemoryEntry(uuid: string, title: string, content: string): Promise<LoreEntryResponse> {
-    return request<LoreEntryResponse>(`/character-memories/entries/${uuid}`, {
+  updateCharacterMemoryEntry(id: number, title: string, content: string): Promise<LoreEntryResponse> {
+    return request<LoreEntryResponse>(`/character-memories/entries/${id}`, {
       method: "PUT",
       body: { title, content },
     });
   },
 
-  deleteCharacterMemoryEntry(uuid: string): Promise<MessageResponse> {
-    return request<MessageResponse>(`/character-memories/entries/${uuid}`, {
+  deleteCharacterMemoryEntry(id: number): Promise<MessageResponse> {
+    return request<MessageResponse>(`/character-memories/entries/${id}`, {
       method: "DELETE",
     });
   },

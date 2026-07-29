@@ -70,12 +70,12 @@ const Lore = () => {
   const loreApi: VectorMemoryApi = useMemo(
     () => ({
       getEntries: () => restService.getWorldEntries(selectedWorld!),
-      getEntry: (uuid: string) => restService.getEntry(uuid),
+      getEntry: (id: number) => restService.getEntry(id),
       createEntry: (title: string, content: string) =>
         restService.createEntry(selectedWorld!, title, content),
-      updateEntry: (uuid: string, title: string, content: string) =>
-        restService.updateEntry(uuid, title, content),
-      deleteEntry: (uuid: string) => restService.deleteEntry(uuid),
+      updateEntry: (id: number, title: string, content: string) =>
+        restService.updateEntry(id, title, content),
+      deleteEntry: (id: number) => restService.deleteEntry(id),
     }),
     [selectedWorld],
   );

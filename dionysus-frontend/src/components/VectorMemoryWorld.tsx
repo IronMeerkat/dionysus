@@ -13,16 +13,14 @@ interface VectorMemoryWorldProps {
 
 const VectorMemoryWorld = ({ api }: VectorMemoryWorldProps) => {
   const [entries, setEntries] = useState<LoreEntryListItem[]>([]);
-  const [selectedEntryUuid, setSelectedEntryUuid] = useState<string | null>(
-    null,
-  );
+  const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setEntries([]);
-    setSelectedEntryUuid(null);
+    setSelectedEntryId(null);
     setError(null);
 
     api
@@ -35,42 +33,41 @@ const VectorMemoryWorld = ({ api }: VectorMemoryWorldProps) => {
   }, [api]);
 
   const openCreateModal = useCallback(() => {
-    setSelectedEntryUuid(null);
+    setSelectedEntryId(null);
     setModalMode("create");
     setModalOpen(true);
   }, []);
 
-  const openEditModal = useCallback((uuid: string) => {
-    setSelectedEntryUuid(uuid);
+  const openEditModal = useCallback((id: number) => {
+    setSelectedEntryId(id);
     setModalMode("edit");
     setModalOpen(true);
   }, []);
 
   const closeModal = useCallback(() => {
     setModalOpen(false);
-    setSelectedEntryUuid(null);
+    setSelectedEntryId(null);
   }, []);
 
   const handleEntrySaved = useCallback((entry: LoreEntryResponse) => {
     setEntries((prev) => {
       const item = {
-        uuid: entry.uuid,
+        id: entry.id,
         title: entry.title,
         created_at: entry.created_at,
-        kind: entry.kind,
-        entity_type: entry.entity_type,
+        updated_at: entry.updated_at,
       };
-      const exists = prev.some((e) => e.uuid === entry.uuid);
+      const exists = prev.some((e) => e.id === entry.id);
       if (exists) {
-        return prev.map((e) => (e.uuid === entry.uuid ? item : e));
+        return prev.map((e) => (e.id === entry.id ? item : e));
       }
       return [...prev, item];
     });
   }, []);
 
-  const handleEntryDeleted = useCallback((uuid: string) => {
-    setEntries((prev) => prev.filter((e) => e.uuid !== uuid));
-    setSelectedEntryUuid(null);
+  const handleEntryDeleted = useCallback((id: number) => {
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    setSelectedEntryId(null);
   }, []);
 
   return (
@@ -93,10 +90,10 @@ const VectorMemoryWorld = ({ api }: VectorMemoryWorldProps) => {
           <div className="lore-entries-list">
             {entries.map((entry) => (
               <VectorMemoryEntryCard
-                key={entry.uuid}
+                key={entry.id}
                 entry={entry}
-                selected={selectedEntryUuid === entry.uuid}
-                onClick={() => openEditModal(entry.uuid)}
+                selected={selectedEntryId === entry.id}
+                onClick={() => openEditModal(entry.id)}
               />
             ))}
           </div>
@@ -109,7 +106,7 @@ const VectorMemoryWorld = ({ api }: VectorMemoryWorldProps) => {
         open={modalOpen}
         onClose={closeModal}
         mode={modalMode}
-        entryUuid={selectedEntryUuid}
+        entryId={selectedEntryId}
         api={api}
         onSaved={handleEntrySaved}
         onDeleted={handleEntryDeleted}

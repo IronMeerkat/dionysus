@@ -38,7 +38,7 @@ export interface ConversationMessageDTO {
 export interface FromConversationResponse {
   id: number;
   title: string;
-  player: PlayerOption;
+  player: CharacterOption;
   characters: CharacterOption[];
   messages: ConversationMessageDTO[];
 }
@@ -49,16 +49,18 @@ export interface RenameConversationResponse {
 }
 
 export interface WorldResponse {
+  id: number;
   name: string;
+  description: string;
   entry_count: number;
+  created_at: string;
 }
 
 export interface LoreEntryListItem {
-  uuid: string;
+  id: number;
   title: string;
   created_at: string;
-  kind?: "episode" | "entity";
-  entity_type?: string;
+  updated_at?: string;
 }
 
 // ---- Entity (Player / NPC) types ----
@@ -77,21 +79,49 @@ export interface DescriptionVersion {
   created_at: string;
 }
 
+// ---- Character status effects ----
+
+export type AdvantageState = "advantage" | "normal" | "disadvantage";
+
+export interface CharacterStatusEffect {
+  id: number;
+  character_id: number;
+  name: string;
+  description: string;
+  affects: string;
+  roll_modifier: number;
+  advantage: AdvantageState;
+  negated_by: string[];
+  negation_condition: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StatusEffectPayload {
+  name: string;
+  description: string;
+  affects: string;
+  roll_modifier: number;
+  advantage: AdvantageState;
+  negated_by: string[];
+  negation_condition: string | null;
+}
+
 export interface EntityDetailResponse {
   id: number;
   name: string;
   created_at: string;
   descriptions: DescriptionVersion[];
+  status_effects?: CharacterStatusEffect[];
 }
 
 export interface LoreEntryResponse {
-  uuid: string;
+  id: number;
   title: string;
   content: string;
-  world_name: string;
+  world_name?: string;
   created_at: string;
-  kind?: "episode" | "entity";
-  entity_type?: string;
+  updated_at?: string;
 }
 
 // ---- Campaign types ----
@@ -128,8 +158,8 @@ export interface CampaignDetailResponse {
 
 export interface VectorMemoryApi {
   getEntries: () => Promise<LoreEntryListItem[]>;
-  getEntry: (uuid: string) => Promise<LoreEntryResponse>;
+  getEntry: (id: number) => Promise<LoreEntryResponse>;
   createEntry: (title: string, content: string) => Promise<LoreEntryResponse>;
-  updateEntry: (uuid: string, title: string, content: string) => Promise<LoreEntryResponse>;
-  deleteEntry: (uuid: string) => Promise<unknown>;
+  updateEntry: (id: number, title: string, content: string) => Promise<LoreEntryResponse>;
+  deleteEntry: (id: number) => Promise<unknown>;
 }

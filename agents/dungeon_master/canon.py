@@ -7,34 +7,28 @@ from langchain_core.messages import HumanMessage
 
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import DungeonMasterState
-from database.graphiti_utils import fire_and_forget, save_secret_notes, save_world_events
+from database.knowledge import save_stream_items
+from database.models import DMSecret, WorldEvent
 from tools.participants import apply_participant_state_update
 from tools.world_state import advance_faction_clock, apply_thread_update, set_location, set_world_clock
+from utils.tasks import fire_and_forget
 
 logger = getLogger(__name__)
 
 
 def make_canon_manager(ctx: DMContext):
     async def canon_manager(state: DungeonMasterState) -> dict:
-        """📖 Apply the plan's structured updates through deterministic writes:
-        world events and secrets to Graphiti; location, world clock, quest
-        threads, and faction clocks to Postgres."""
+        """📖 Apply the plan's structured updates through deterministic writes
+        to Postgres: world events and secrets; location, world clock, quest
+        threads, and faction clocks."""
         plan = state.plan
         if not plan:
             return {"messages": []}
 
         if plan.new_world_events:
-            fire_and_forget(save_world_events(
-                events=plan.new_world_events,
-                campaign_id=ctx.campaign.id,
-                lore_world=ctx.campaign.lore_world,
-            ))
+            fire_and_forget(save_stream_items(WorldEvent, ctx.campaign.id, plan.new_world_events))
         if plan.secret_notes:
-            fire_and_forget(save_secret_notes(
-                notes=plan.secret_notes,
-                campaign_id=ctx.campaign.id,
-                lore_world=ctx.campaign.lore_world,
-            ))
+            fire_and_forget(save_stream_items(DMSecret, ctx.campaign.id, [plan.secret_notes]))
         if plan.time_location_update:
             await asyncio.to_thread(set_location, ctx.campaign.id, plan.time_location_update)
         if plan.world_clock_update:
@@ -66,15 +60,14 @@ def make_canon_manager(ctx: DMContext):
                     apply_participant_state_update(
                         ctx.campaign.id,
                         name=update.name,
-                        role=update.role,
                         stats_set=update.stats_set,
-                        status_added=update.status_added,
+                        status_added=[s.model_dump(exclude_none=True) for s in update.status_added],
                         status_removed=update.status_removed,
                         modifiers_set=update.modifiers_set,
                         notes=update.notes,
                     )
                 except Exception:
-                    logger.exception(f"💥 Failed to apply participant state update for '{update.name}' ({update.role})")
+                    logger.exception(f"💥 Failed to apply participant state update for '{update.name}'")
 
         await asyncio.gather(
             asyncio.to_thread(_apply_threads),

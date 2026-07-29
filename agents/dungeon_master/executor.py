@@ -17,6 +17,7 @@ NODE_NARRATOR = "npc_narrator"
 async def _stream_npc_to_socket(
     npc_graph: object,
     input_messages: list[AnyMessage],
+    lore: str,
     speaker: str,
     sio: socketio.AsyncServer,
     sid: str,
@@ -44,7 +45,8 @@ async def _stream_npc_to_socket(
             await sio.emit("stream_start", {"messageId": message_id, "name": speaker}, to=sid)
 
     stream = npc_graph.astream(
-        {"messages": input_messages}, stream_mode=["messages", "updates"], subgraphs=True,
+        {"messages": input_messages, "lore": lore},
+        stream_mode=["messages", "updates"], subgraphs=True,
     )
 
     async for _namespace, mode, payload in stream:
@@ -113,10 +115,10 @@ def make_npc_executor(ctx: DMContext):
             try:
                 if ctx.sio is not None and ctx.sid is not None:
                     delta = await _stream_npc_to_socket(
-                        npc_graph, input_messages, character.name, ctx.sio, ctx.sid,
+                        npc_graph, input_messages, state.lore, character.name, ctx.sio, ctx.sid,
                     )
                 else:
-                    result = await npc_graph.ainvoke({"messages": input_messages})
+                    result = await npc_graph.ainvoke({"messages": input_messages, "lore": state.lore})
                     delta = result.get("messages", [])[len(input_messages):]
                 all_messages.extend(delta)
                 logger.info(f"🎭 {directive.name} produced {len(delta)} message(s)")
