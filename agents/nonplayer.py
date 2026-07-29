@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemM
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
-from hephaestus.helpers import Oligaton
 from hephaestus.settings import settings
 
 from database.graphiti_utils import (
@@ -22,12 +21,10 @@ from database.graphiti_utils import (
 from database.models import Character as CharacterModel
 from database.models.conversation import Conversation
 from tools.participants import render_npc_state, render_player_state
-from utils.llm_models import npc_emotions, npc_narration, npc_thoughts
+from utils.llm_models import npc_narration
 from utils.prompts import (
     character_episodic_memory,
-    emotions_prompt_template,
     narrator_prompt_template,
-    plan_prompt_template,
 )
 
 if TYPE_CHECKING:
@@ -35,15 +32,6 @@ if TYPE_CHECKING:
 
 info_limits = settings.graphiti.information_limits
 logger = getLogger(__name__)
-
-
-class EmotionalState(BaseModel, metaclass=Oligaton):
-    love: int = Field(default=0, ge=-20, le=20, description="Intensity of affectionate attachment.")
-    hate: int = Field(default=0, ge=-20, le=20, description="Intensity of hostile aversion.")
-    fear: int = Field(default=0, ge=-20, le=20, description="Intensity of perceived threat or dread.")
-    joy: int = Field(default=0, ge=-20, le=20, description="Intensity of happiness or delight.")
-    sadness: int = Field(default=0, ge=-20, le=20, description="Intensity of sorrow or grief.")
-    hope: int = Field(default=0, ge=-20, le=20, description="Intensity of positive expectation for outcomes.")
 
 
 def strip_speaker_prefix(raw: str, name: str) -> str:
@@ -142,16 +130,12 @@ def spawn_npc_directed(
     other_speakers = [c.name for c in conversation.characters if c.id != character.id]
     other_speakers.append(conversation.player.name)
 
-    emotional_state_model = npc_emotions.with_structured_output(EmotionalState.model_json_schema(), strict=True)
-    emotional_state = EmotionalState(_key=character.name)
-
     withheld_block = "".join(f"\n- {fact}" for fact in directive.withheld_info)
     if withheld_block:
         withheld_block = "\n[INFORMATION YOU DO NOT KNOW - never reference these facts]" + withheld_block
 
     class NPCState(BaseModel):
         messages: Annotated[list[AnyMessage], operator.add]
-        thoughts: str = Field(default="")
         lore: str = Field(default="")
         memories: str = Field(default="")
         self_state: str = Field(default="", description="This NPC's live mechanical state, rendered prompt-ready.")
@@ -161,11 +145,6 @@ def spawn_npc_directed(
         def combined_messages(self) -> list[AnyMessage]:
             combo = [*conversation.message_buffer, *self.messages]
             return combo[-min(settings.context_size, len(combo)):]
-
-        @property
-        def emotional_state(self) -> str:
-            raw = emotional_state.model_dump(exclude_unset=True)
-            return "\n".join(f"{k}: {v}" for k, v in raw.items())
 
         @property
         def combined_dump(self) -> dict:
@@ -178,7 +157,6 @@ def spawn_npc_directed(
                 "location": conversation.campaign.location,
                 "story_background": conversation.campaign.story_background,
                 "messages": self.combined_messages,
-                "emotional_state": self.emotional_state,
                 "dm_guidance": directive.guidance,
                 **self.model_dump(exclude={"messages"}),
             }
@@ -208,26 +186,6 @@ def spawn_npc_directed(
             "messages": [],
         }
 
-    async def emotion_updater(state: NPCState) -> dict:
-        prompt = await emotions_prompt_template.ainvoke(state.combined_dump)
-        delta = await emotional_state_model.ainvoke(prompt)
-        logger.info(f"💖 Emotion delta for {character.name}: {delta}")
-
-        for field_name, value in delta.items():
-            current = getattr(emotional_state, field_name)
-            setattr(emotional_state, field_name, max(-20, min(20, current + value)))
-        return {"messages": []}
-
-    async def planner(state: NPCState) -> dict:
-        prompt = await plan_prompt_template.ainvoke(state.combined_dump)
-        thoughts = await npc_thoughts.ainvoke(prompt)
-        if thoughts.content is None:
-            logger.warning(f"🧠 {character.name} planner returned None")
-
-        tagged = f"## {character.name} THOUGHTS:\n{thoughts.content}"
-        logger.info(f"🧠 {character.name}: {tagged[:200]}...")
-        return {"thoughts": tagged, "messages": []}
-
     async def npc_narrator(state: NPCState) -> dict:
         prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
         prefix = f"{character.name}: "
@@ -252,13 +210,11 @@ def spawn_npc_directed(
         return {"messages": [response]}
 
     graph = StateGraph(NPCState)
-    for node in (context_loader, emotion_updater, planner, npc_narrator):
+    for node in (context_loader, npc_narrator):
         graph.add_node(node.__name__, node)
 
     graph.add_edge(START, "context_loader")
-    graph.add_edge("context_loader", "emotion_updater")
-    graph.add_edge("emotion_updater", "planner")
-    graph.add_edge("planner", "npc_narrator")
+    graph.add_edge("context_loader", "npc_narrator")
     graph.add_edge("npc_narrator", END)
 
     return graph.compile(name=character.name)

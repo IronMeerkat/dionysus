@@ -15,7 +15,6 @@ from agents.dungeon_master import NARRATOR_NAME
 
 logger = getLogger(__name__)
 
-NODE_PLANNER = "planner"
 NODE_USE_TOOLS = "use_tools"
 NODE_NARRATOR = "npc_narrator"
 NODE_DM_NARRATOR_OPENING = "dm_narrator_opening"
@@ -31,7 +30,7 @@ STREAMABLE_NODES = frozenset({
 # Nodes that speak with the Narrator voice (speaker attribution + no prefix stripping).
 DM_NARRATOR_NODES = frozenset({NODE_DM_NARRATOR_OPENING, NODE_DM_NARRATOR_CLOSING, NODE_OOC_RESPONDER})
 
-SKIP_NODES = frozenset({NODE_PLANNER, NODE_USE_TOOLS})
+SKIP_NODES = frozenset({NODE_USE_TOOLS})
 
 
 def resolve_speaker(character_list: list[str], path: list[str], langgraph_node: str) -> str:
@@ -53,7 +52,7 @@ def resolve_speaker(character_list: list[str], path: list[str], langgraph_node: 
 
 
 def path_from_namespace(namespace: tuple[str, ...]) -> list[str]:
-    """Extract node names from namespace, e.g. ('character_1:uuid', 'planner:uuid') -> ['character_1', 'planner']."""
+    """Extract node names from namespace, e.g. ('character_1:uuid', 'npc_narrator:uuid') -> ['character_1', 'npc_narrator']."""
     return [
         name for part in namespace
         if not (name := part.split(":")[0] if ":" in part else part).startswith("__")

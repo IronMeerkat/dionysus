@@ -39,8 +39,6 @@ def _nano(
         cfg["max_tokens"] = max_tokens
     return cfg
 
-npc_emotions = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
-npc_thoughts = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"}, max_tokens=2400)
 npc_narration = ChatNanoGPT(**nanogpt)
 # npc_narration = ChatXAI(**models.xai)
 
