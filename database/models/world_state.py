@@ -16,7 +16,8 @@ class WorldState(Base):
     change during play. Unlike the static ``Campaign`` metadata, these are
     mutated by the DM canon manager as scenes move. A campaign has at most
     one row; access it through ``Campaign.world_state`` or the
-    ``ensure_world_state`` helper.
+    ``tools.world_state`` helpers (``get_world_state`` / ``set_location`` /
+    ``set_world_clock``).
     """
 
     __tablename__ = "world_state"

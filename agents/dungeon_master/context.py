@@ -1,19 +1,18 @@
 """Shared turn context and the context-loading nodes for the DM supervisor."""
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from logging import getLogger
 
 import socketio
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agents.dungeon_master.schemas import DungeonMasterState
-from agents.skills.registry import _load_lore_context
-from database.knowledge import load_recent_stream
-from database.models import DMSecret, PlayerPreference, WorldEvent
+from database.models import Campaign, DMSecret, PlayerPreference, World, WorldEvent
 from database.models.conversation import Conversation
+from database.models.lore import LoreEntry
 from tools.mechanics import list_mechanics, render_mechanics_full
 from tools.participants import render_participant_state, render_participant_states
-from tools.status_effects import character_sheet
+from tools.status_effects import character_sheet_by_id
 from tools.world_state import (
     list_faction_clocks,
     list_open_threads,
@@ -31,9 +30,34 @@ class DMContext:
     sio: socketio.AsyncServer | None = None
     sid: str | None = None
 
+    # Immutable scalar snapshots captured at construction, so threaded
+    # helpers can take plain ints instead of touching ORM objects.
+    campaign_id: int = field(init=False)
+    player_id: int | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.campaign_id = self.conversation.campaign_id
+        self.player_id = self.conversation.player_id
+
+    # ------------------------------------------------------------------
+    # Data freshness model
+    # ------------------------------------------------------------------
+    # ``ctx.conversation`` is a DETACHED snapshot loaded when the socket
+    # session started: it owns identity, the roster, and the message
+    # buffer/bookkeeping, and its eagerly-loaded relationships (campaign,
+    # player, characters, messages) stay readable forever. Anything that
+    # CHANGES during play -- scene location, narrative clock, story
+    # background, character sheets -- is fetched fresh per property access
+    # through its own task session, which is safe from any thread (event
+    # loop or ``asyncio.to_thread`` worker).
+
     @property
-    def campaign(self):
+    def campaign(self) -> Campaign:
+        """The snapshot Campaign row (id, name, contract, lore world)."""
         return self.conversation.campaign
+
+    def _fresh_campaign(self) -> Campaign | None:
+        return Campaign.get(id=self.campaign_id)
 
     @property
     def player(self):
@@ -41,15 +65,18 @@ class DMContext:
 
     @property
     def world_clock(self) -> str:
-        return self.campaign.world_clock or "(unspecified)"
+        campaign = self._fresh_campaign()
+        return (campaign.world_clock if campaign else "") or "(unspecified)"
 
     @property
     def location(self) -> str:
-        return self.campaign.location
+        campaign = self._fresh_campaign()
+        return campaign.location if campaign else ""
 
     @property
     def story_background(self) -> str:
-        return self.campaign.story_background or ""
+        campaign = self._fresh_campaign()
+        return (campaign.story_background if campaign else "") or ""
 
     @property
     def mechanics(self) -> str:
@@ -67,12 +94,14 @@ class DMContext:
 
     @property
     def npc_descriptions(self) -> str:
-        return "\n\n".join(f"**{c.name}**:\n{character_sheet(c)}" for c in self.conversation.characters)
+        return "\n\n".join(
+            f"**{c.name}**:\n{character_sheet_by_id(c.id)}" for c in self.conversation.characters
+        )
 
     @property
     def player_sheet(self) -> str:
         """The PC's character card with permanent status effects appended."""
-        return character_sheet(self.player)
+        return character_sheet_by_id(self.player_id)
 
     def combined_messages(self, state: DungeonMasterState, limit: int | None = None) -> list[AnyMessage]:
         combo = [*self.conversation.message_buffer, *state.messages]
@@ -96,27 +125,33 @@ def make_state_loader(ctx: DMContext):
         which lets the slower lore-retriever tool loop overlap with intent
         classification.
         """
-        # The participant renders share the codebase's one global Session and
-        # can commit (ensure_campaign_participant), so they run sequentially
-        # on a single thread; everything else uses per-call sessions and is
-        # safe to gather. The PC is excluded from the NPC roster in case it
-        # was also added to the conversation's character list.
         def _participant_states() -> tuple[str, str]:
-            npcs = [c for c in ctx.conversation.characters if c.id != ctx.player.id]
+            npcs = [c for c in ctx.conversation.characters if c.id != ctx.player_id]
             return (
-                render_participant_state(ctx.campaign.id, ctx.player.id),
-                render_participant_states(ctx.campaign.id, npcs),
+                render_participant_state(ctx.campaign_id, ctx.player_id),
+                render_participant_states(ctx.campaign_id, npcs),
             )
+
+        def _lore_catalog() -> str:
+            world_name = ctx.campaign.lore_world
+            world = World.get_world_by_name(world_name)
+            if world is None:
+                logger.warning(f"⚠️ World '{world_name}' not found for lore catalog")
+                return "(world has no entries yet)"
+            entries = LoreEntry.preview_entries(world)
+            if not entries:
+                return "(world has no entries yet)"
+            return "\n".join(f"- id={e['id']} | title='{e['title']}'" for e in entries)
 
         (threads_rows, clocks_rows, (player_state, npc_states),
          events, secrets, prefs, lore_catalog) = await asyncio.gather(
-            asyncio.to_thread(list_open_threads, ctx.campaign.id),
-            asyncio.to_thread(list_faction_clocks, ctx.campaign.id),
+            asyncio.to_thread(list_open_threads, ctx.campaign_id),
+            asyncio.to_thread(list_faction_clocks, ctx.campaign_id),
             asyncio.to_thread(_participant_states),
-            asyncio.to_thread(load_recent_stream, WorldEvent, ctx.campaign.id),
-            asyncio.to_thread(load_recent_stream, DMSecret, ctx.campaign.id),
-            asyncio.to_thread(load_recent_stream, PlayerPreference, ctx.campaign.id),
-            _load_lore_context([], world_name=ctx.campaign.lore_world),
+            asyncio.to_thread(WorldEvent.recent, ctx.campaign_id),
+            asyncio.to_thread(DMSecret.recent, ctx.campaign_id),
+            asyncio.to_thread(PlayerPreference.recent, ctx.campaign_id),
+            asyncio.to_thread(_lore_catalog),
         )
         threads = render_threads(threads_rows)
         clocks = render_clocks(clocks_rows)

@@ -11,11 +11,10 @@ from pydantic import BaseModel, Field
 
 from hephaestus.settings import settings
 
-from database.knowledge import process_and_save_memory, recall_memories
-from database.models import Character as CharacterModel
+from database.models import Campaign, Character as CharacterModel, CharacterMemory
 from database.models.conversation import Conversation
 from tools.participants import render_participant_state
-from tools.status_effects import character_sheet
+from tools.status_effects import character_sheet_by_id
 from utils.llm_models import npc_narration
 from utils.prompts import narrator_prompt_template
 from utils.tasks import fire_and_forget
@@ -114,8 +113,11 @@ def spawn_npc_directed(
     already decided this NPC responds this turn, so there is no veto.
     """
 
+    # Sheets/location/background are fetched fresh per spawn (the conversation
+    # is a detached snapshot; its roster supplies ids and names only).
+    campaign = Campaign.get(id=conversation.campaign_id)
     other_characters = "\n\n\n".join(
-        f"**{c.name}**:\n{character_sheet(c)}"
+        f"**{c.name}**:\n{character_sheet_by_id(c.id)}"
         for c in conversation.characters
         if c.id != character.id
     )
@@ -142,12 +144,12 @@ def spawn_npc_directed(
         def combined_dump(self) -> dict:
             return {
                 "name": character.name,
-                "description": character_sheet(character) + withheld_block,
+                "description": character_sheet_by_id(character.id) + withheld_block,
                 "other_characters": other_characters,
-                "player": character_sheet(conversation.player),
+                "player": character_sheet_by_id(conversation.player_id),
                 "player_name": conversation.player.name,
-                "location": conversation.campaign.location,
-                "story_background": conversation.campaign.story_background,
+                "location": campaign.location if campaign else "",
+                "story_background": (campaign.story_background if campaign else "") or "",
                 "messages": self.combined_messages,
                 "dm_guidance": directive.guidance,
                 **self.model_dump(exclude={"messages"}),
@@ -159,16 +161,14 @@ def spawn_npc_directed(
         last_human = next((m for m in reversed(state.messages) if isinstance(m, HumanMessage)), None)
         query = last_human.content if last_human else character.name
 
-        # The two renders share the codebase's one global Session, so they
-        # run sequentially on a single thread to avoid a concurrent commit.
         def _participant_states() -> tuple[str, str]:
             return (
-                render_participant_state(conversation.campaign.id, character.id, character.name),
-                render_participant_state(conversation.campaign.id, conversation.player.id),
+                render_participant_state(conversation.campaign_id, character.id, character.name),
+                render_participant_state(conversation.campaign_id, conversation.player.id),
             )
 
         memories, (self_state, player_state) = await asyncio.gather(
-            recall_memories(conversation.campaign.id, character.id, query),
+            CharacterMemory.recall(conversation.campaign_id, character.id, query),
             asyncio.to_thread(_participant_states),
         )
         return {
@@ -191,12 +191,12 @@ def spawn_npc_directed(
         response.content = prefix + content
         response.name = character.name
         response.id = str(uuid4())
-        fire_and_forget(process_and_save_memory(
+        fire_and_forget(CharacterMemory.process_and_save(
             messages=state.combined_messages,
-            campaign_id=conversation.campaign.id,
+            campaign_id=conversation.campaign_id,
             character_id=character.id,
             character_name=character.name,
-            character_description=character.description,
+            character_description=character_sheet_by_id(character.id),
         ))
         return {"messages": [response]}
 

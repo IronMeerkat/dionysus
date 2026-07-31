@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableConfig
 
 from agents.skilled_agent import spawn_skilled_agent
 from hephaestus.langfuse_handler import langfuse_callback_handler
+from tools.campaign_admin import get_campaign_row
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +49,22 @@ def register_campaign_admin_events(sio: socketio.AsyncServer) -> None:
             return
 
         try:
+            campaign = get_campaign_row(campaign_id_int)
+            if campaign is None:
+                logger.error(f"💥 [campaign-admin] Campaign {campaign_id_int} not found (sid={sid})")
+                await sio.emit(
+                    "error",
+                    {"message": f"Campaign {campaign_id_int} not found."},
+                    to=sid,
+                    namespace=CAMPAIGN_ADMIN_NS,
+                )
+                return
+
             graph = spawn_skilled_agent(
                 ["campaign-admin"],
                 active=["campaign-admin"],
                 campaign_id=campaign_id_int,
+                world_name=campaign.lore_world,
                 name="campaign_admin",
             )
             await sio.save_session(sid, {

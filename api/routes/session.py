@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
 
 from database.models import Campaign, Character, Conversation
-from database.postgres_connection import session
+from database.postgres_connection import db_session
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +51,17 @@ def setup_session(
     The client should then pass the returned ``id`` to the SocketIO
     ``init_session`` event to start the in-RAM session.
     """
-    campaign = session.query(Campaign).filter(Campaign.id == campaign_id).first()
-    if not campaign:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-    # The player is whichever character the conversation designates as the PC.
-    player = session.query(Character).filter(Character.id == player_id).first()
-    if not player:
-        raise HTTPException(status_code=404, detail="Player character not found")
-    characters = session.query(Character).filter(Character.id.in_(character_ids)).all()
-    if not characters:
-        raise HTTPException(status_code=404, detail="Characters not found")
+    with db_session() as s:
+        campaign = s.query(Campaign).filter(Campaign.id == campaign_id).first()
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        # The player is whichever character the conversation designates as the PC.
+        player = s.query(Character).filter(Character.id == player_id).first()
+        if not player:
+            raise HTTPException(status_code=404, detail="Player character not found")
+        characters = s.query(Character).filter(Character.id.in_(character_ids)).all()
+        if not characters:
+            raise HTTPException(status_code=404, detail="Characters not found")
 
     conversation = Conversation.create(
         player=player,
@@ -73,7 +74,8 @@ def setup_session(
 
 @session_router.get("/options")
 def get_options() -> dict:
-    characters = session.query(Character.id, Character.name).order_by(Character.id.asc()).all()
+    with db_session() as s:
+        characters = s.query(Character.id, Character.name).order_by(Character.id.asc()).all()
     return {
         "characters": [{"id": c.id, "name": c.name} for c in characters],
     }
@@ -82,8 +84,10 @@ def get_options() -> dict:
 @session_router.get("/from_conversation/{conversation_id}")
 def from_conversation(conversation_id: int) -> dict[str, object]:
     """Return full conversation data so the client can call ``init_session``."""
-    conversation = session.query(Conversation).filter(Conversation.id == conversation_id).first()
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    with db_session() as s:
+        conversation = s.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        response = _conversation_response(conversation)
     logger.info(f"🔄 Loaded conversation {conversation_id}")
-    return _conversation_response(conversation)
+    return response

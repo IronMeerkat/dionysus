@@ -2,8 +2,8 @@
 structured hops (intent routing, continuity checking, scene-change detection).
 
 Each classifier's instructions live in a SKILL.md file (see ``skills/``);
-this module owns only prompt assembly, the structured-output call, and the
-fail-open fallbacks that keep a turn alive when a classifier errors.
+this module owns only prompt assembly, the structured-output call, and
+fail-secure recovery (catch → log → return None / go back — never invent success).
 """
 import asyncio
 from logging import getLogger
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import ContinuityVerdict, DungeonMasterState, IntentReading
 from agents.skills.registry import skill_registry
-from database import knowledge
+from database.models.lore import LoreEntry
 from utils.llm_models import dm_continuity_model, dm_intent_model
 
 logger = getLogger(__name__)
@@ -29,43 +29,44 @@ ROUTER_CONTEXT_WINDOW = 12
 CONTINUITY_CONTEXT_WINDOW = 12
 
 
-async def run_classifier(
-    skill: str,
-    schema: type[T],
-    model: BaseChatModel,
-    variables: dict[str, Any],
-    *,
-    fallback: T | None,
-    label: str,
-) -> T | None:
-    """Render a classifier skill, call the model with structured output, and
-    return *fallback* (logging the failure) when anything goes wrong."""
+async def run_classifier(skill: str, model: BaseChatModel, schema: type[T], variables: dict[str, Any], *, label: str) -> T | None:
+    """Render a classifier skill and call the model with structured output.
+
+    Fail-secure: on exception or a ``None`` structured result, log and return
+    ``None``. Never invent a fake classification. Callers must handle ``None``
+    by recovering (skip / go back) — not by pretending the hop succeeded.
+    """
     prompt = await skill_registry.render(skill).ainvoke(variables)
     llm = model.with_structured_output(schema, strict=True)
     try:
-        return await llm.ainvoke(prompt)
+        result = await llm.ainvoke(prompt)
     except Exception:
-        logger.exception(f"💥 [{label}] classifier '{skill}' failed; using fail-open fallback")
-        return fallback
+        logger.exception(f"💥 [{label}] classifier '{skill}' failed; returning None")
+        return None
+    if result is None:
+        logger.warning(f"⚠️ [{label}] classifier '{skill}' returned None; not inventing a result")
+        return None
+    return result
 
 
 async def _read_selected_lore(entry_ids: list[int]) -> str:
     """📚 Fetch the full markdown of the intent router's selected lore entries.
 
     Deterministic: the classifier picks ids from the catalog, code does the
-    reads -- no tool loop. Unknown ids are logged and skipped (fail-open).
+    reads -- no tool loop. Unknown ids are logged and skipped (never invented).
     """
     if not entry_ids:
         return "(no lore retrieved this turn)"
     entries = await asyncio.gather(
-        *(asyncio.to_thread(knowledge.get_entry, entry_id) for entry_id in dict.fromkeys(entry_ids))
+        *(asyncio.to_thread(LoreEntry.get_entry, entry_id) 
+        for entry_id in dict.fromkeys(entry_ids))
     )
     docs: list[str] = []
     for entry_id, entry in zip(dict.fromkeys(entry_ids), entries):
         if entry is None:
             logger.warning(f"⚠️ [intent_router] lore entry id={entry_id} not found, skipping")
             continue
-        docs.append(f"# {entry['title']}\n\n{entry['content']}")
+        docs.append(f"# {entry.title}\n\n{entry.content}")
     lore = "\n\n---\n\n".join(docs) if docs else "(no lore retrieved this turn)"
     logger.info(f"📚 [intent_router] fetched {len(docs)} lore document(s)")
     return lore
@@ -76,8 +77,8 @@ def make_intent_router(ctx: DMContext):
         """🧭 Classify the player's latest message and select the lore to read."""
         reading = await run_classifier(
             "dm-intent-routing",
-            IntentReading,
             dm_intent_model,
+            IntentReading,
             {
                 "player_name": ctx.player.name,
                 "location": ctx.location,
@@ -87,14 +88,15 @@ def make_intent_router(ctx: DMContext):
                 "lore_catalog": state.lore_catalog,
                 "messages": ctx.combined_messages(state, limit=ROUTER_CONTEXT_WINDOW),
             },
-            fallback=IntentReading(
-                intent_type="dialogue",
-                scene_mode="social",
-                needs_adjudication=False,
-                summary=ctx.last_human_query(state, fallback="(unreadable intent)")[:200],
-            ),
             label="intent_router",
         )
+        if reading is None:
+            logger.error("🧭 Intent classifier failed; continuing without a fabricated reading")
+            return {
+                "messages": [],
+                "intent": None,
+                "lore": "(intent classification failed this turn)",
+            }
         logger.info(
             f"🧭 Intent: {reading.intent_type} / {reading.scene_mode} "
             f"(adjudicate={reading.needs_adjudication}) -- {reading.summary[:120]}"
@@ -163,8 +165,8 @@ def make_continuity_checker(ctx: DMContext):
 
         verdict = await run_classifier(
             "dm-continuity-check",
-            ContinuityVerdict,
             dm_continuity_model,
+            ContinuityVerdict,
             {
                 "player_name": ctx.player.name,
                 "location": ctx.location,
@@ -177,11 +179,16 @@ def make_continuity_checker(ctx: DMContext):
                 "plan_json": state.plan.model_dump_json(indent=2),
                 "messages": ctx.combined_messages(state, limit=CONTINUITY_CONTEXT_WINDOW),
             },
-            fallback=None,
             label="continuity_checker",
         )
         if verdict is None:
-            return {"messages": [], "continuity_notes": ""}
+            # Fail-secure: do not approve by silence — send the planner back.
+            notes = (
+                "- Continuity classifier failed to complete; do not assume the plan is safe. "
+                "Simplify or re-validate before proceeding."
+            )
+            logger.error(f"🛡️ Continuity classifier failed; rejecting plan for repair:\n{notes}")
+            return {"messages": [], "continuity_notes": notes}
 
         if verdict.approved or not verdict.issues:
             logger.info("🛡️ Plan approved by continuity checker")

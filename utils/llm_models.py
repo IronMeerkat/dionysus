@@ -9,44 +9,44 @@ from utils.nanogpt_integration import ChatNanoGPT
 
 models = settings.models
 
-xai = models.xai.model_dump()
-xai_small = models.xai_small.model_dump()
-nanogpt = models.nanogpt.model_dump()
 
+glm = models.glm.model_dump()
+moonshot = models.moonshot.model_dump()
+small_glm = models.small_glm.model_dump()
 
-def _nano(
-    *,
-    thinking_disabled: bool = False,
-    reasoning_effort: str | None = None,
-    max_tokens: int | None = None,
-) -> dict[str, Any]:
-    """🪙 Build a tuned nanogpt config for simple/cheap hops.
+# def _nano(
+#     *,
+#     thinking_disabled: bool = False,
+#     reasoning_effort: str | None = None,
+#     max_tokens: int | None = None,
+# ) -> dict[str, Any]:
+#     """🪙 Build a tuned nanogpt config for simple/cheap hops.
 
-    GLM-5.2 defaults to *unbounded* reasoning, which is a costly 7-minute trap
-    for trivial work. Pass ``thinking_disabled=True`` to skip thinking entirely
-    (pure classification/detection), or ``reasoning_effort`` to cap it at the
-    cheapest enabled level. ``max_tokens`` caps the response budget.
-    """
-    cfg = copy.deepcopy(nanogpt)
-    extra = dict(cfg.get("extra_body", {}))
-    if thinking_disabled:
-        extra["thinking"] = {"type": "disabled"}
-    elif reasoning_effort is not None:
-        extra["thinking"] = {"type": "enabled"}
-        extra["reasoning_effort"] = reasoning_effort
-    cfg["extra_body"] = extra
-    if max_tokens is not None:
-        cfg["max_tokens"] = max_tokens
-    return cfg
+#     GLM-5.2 defaults to *unbounded* reasoning, which is a costly 7-minute trap
+#     for trivial work. Pass ``thinking_disabled=True`` to skip thinking entirely
+#     (pure classification/detection), or ``reasoning_effort`` to cap it at the
+#     cheapest enabled level. ``max_tokens`` caps the response budget.
+#     """
+#     cfg = copy.deepcopy(nanogpt)
+#     extra = dict(cfg.get("extra_body", {}))
+#     if thinking_disabled:
+#         extra["thinking"] = {"type": "disabled"}
+#     elif reasoning_effort is not None:
+#         extra["thinking"] = {"type": "enabled"}
+#         extra["reasoning_effort"] = reasoning_effort
+#     cfg["extra_body"] = extra
+#     if max_tokens is not None:
+#         cfg["max_tokens"] = max_tokens
+#     return cfg
 
-npc_narration = ChatNanoGPT(**nanogpt)
+npc_narration = ChatNanoGPT(**glm)
 # npc_narration = ChatXAI(**models.xai)
 
-scene_change = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=128)) #ChatXAI(**xai, max_tokens=128)
+scene_change = ChatNanoGPT(**moonshot) #ChatXAI(**xai, max_tokens=128)
 
 # One model for every skill-driven tool agent (lore management, NPC building,
 # campaign admin); the differentiating behavior lives in SKILL.md files.
-skilled_agent_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
+skilled_agent_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
 
 # skilled_agent_model = ChatNanoGPT(
 #     model="Qwen3.5-27B-BlueStar-Derestricted",
@@ -55,20 +55,20 @@ skilled_agent_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reason
 #     max_retries=4,
 # )
 
-memory_filter = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=1024)) #ChatXAI(**xai)
+memory_filter = ChatNanoGPT(**glm) #ChatXAI(**xai)
 
 
-dm_planner_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"}, max_tokens=2400)
+dm_planner_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"}, max_tokens=2400)
 
 # dm_narrator_model = ChatXAI(**models.xai)
 
-dm_narrator_model = ChatNanoGPT(**nanogpt)
+dm_narrator_model = ChatNanoGPT(**glm)
 
 # --- DM supervisor subagents ------------------------------------------------
 # Fast non-reasoning model for cheap classification/validation hops.
-dm_intent_model = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=512)) #ChatXAI(**xai_small)
-dm_continuity_model = ChatNanoGPT(**_nano(thinking_disabled=True, max_tokens=512)) #ChatXAI(**xai_small)
+dm_intent_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai_small)
+dm_continuity_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai_small)
 
-dm_ooc_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai)
-dm_summarizer_model = ChatNanoGPT(**_nano(reasoning_effort="high", max_tokens=1024)) #ChatXAI(**xai)
-dm_faction_model = ChatNanoGPT(**nanogpt) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})
+dm_ooc_model = ChatNanoGPT(**glm) #ChatXAI(**xai)
+dm_summarizer_model = ChatNanoGPT(**glm) #ChatXAI(**xai)
+dm_faction_model = ChatNanoGPT(**glm) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})

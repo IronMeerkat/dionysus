@@ -10,8 +10,10 @@ free of imports from other tool modules so both ``tools/campaign_admin.py``
 """
 from logging import getLogger
 
+from sqlalchemy.orm import Session
+
 from database.models import CampaignMechanic
-from database.postgres_connection import session
+from database.postgres_connection import db_session
 
 logger = getLogger(__name__)
 
@@ -21,22 +23,29 @@ logger = getLogger(__name__)
 # ------------------------------------------------------------------
 
 def list_mechanics(campaign_id: int) -> list[CampaignMechanic]:
-    """⚙️ All mechanics documents for a campaign, ordered by title."""
-    return (
-        session.query(CampaignMechanic)
-        .filter(CampaignMechanic.campaign_id == campaign_id)
-        .order_by(CampaignMechanic.title)
-        .all()
+    """⚙️ All mechanics documents for a campaign (detached), ordered by title."""
+    with db_session() as s:
+        return (
+            s.query(CampaignMechanic)
+            .filter(CampaignMechanic.campaign_id == campaign_id)
+            .order_by(CampaignMechanic.title)
+            .all()
+        )
+
+
+def _find_mechanic(s: Session, campaign_id: int, title: str) -> CampaignMechanic | None:
+    clean = title.strip().lower()
+    return next(
+        (m for m in s.query(CampaignMechanic).filter(CampaignMechanic.campaign_id == campaign_id)
+         if m.title.lower() == clean),
+        None,
     )
 
 
 def get_mechanic(campaign_id: int, title: str) -> CampaignMechanic | None:
-    """⚙️ Fetch one mechanics document by (campaign, title), case-insensitive."""
-    clean = title.strip().lower()
-    return next(
-        (m for m in list_mechanics(campaign_id) if m.title.lower() == clean),
-        None,
-    )
+    """⚙️ Fetch one mechanics document (detached) by (campaign, title), case-insensitive."""
+    with db_session() as s:
+        return _find_mechanic(s, campaign_id, title)
 
 
 def upsert_mechanic(campaign_id: int, title: str, content: str) -> CampaignMechanic:
@@ -46,29 +55,31 @@ def upsert_mechanic(campaign_id: int, title: str, content: str) -> CampaignMecha
     re-casing its title. Content is replaced wholesale -- these documents
     supersede themselves ("supersedes all prior leash text").
     """
-    existing = get_mechanic(campaign_id, title)
-    if existing is None:
-        existing = CampaignMechanic(
-            campaign_id=campaign_id, title=title.strip(), content=content.strip()
-        )
-        session.add(existing)
-        logger.info(f"⚙️ Creating mechanics doc '{title.strip()}' for campaign {campaign_id}")
-    else:
-        logger.info(f"⚙️ Replacing mechanics doc '{existing.title}' for campaign {campaign_id}")
-        existing.content = content.strip()
-    session.commit()
+    with db_session() as s:
+        existing = _find_mechanic(s, campaign_id, title)
+        if existing is None:
+            existing = CampaignMechanic(
+                campaign_id=campaign_id, title=title.strip(), content=content.strip()
+            )
+            s.add(existing)
+            logger.info(f"⚙️ Creating mechanics doc '{title.strip()}' for campaign {campaign_id}")
+        else:
+            logger.info(f"⚙️ Replacing mechanics doc '{existing.title}' for campaign {campaign_id}")
+            existing.content = content.strip()
+        s.flush()  # populate defaults before detach
     return existing
 
 
 def delete_mechanic(campaign_id: int, title: str) -> bool:
     """🗑️ Remove one mechanics document by (campaign, title)."""
-    existing = get_mechanic(campaign_id, title)
-    if existing is None:
-        logger.warning(f"⚠️ Mechanics doc '{title}' not found in campaign {campaign_id}")
-        return False
-    session.delete(existing)
-    session.commit()
-    logger.info(f"🗑️ Deleted mechanics doc '{existing.title}' from campaign {campaign_id}")
+    with db_session() as s:
+        existing = _find_mechanic(s, campaign_id, title)
+        if existing is None:
+            logger.warning(f"⚠️ Mechanics doc '{title}' not found in campaign {campaign_id}")
+            return False
+        title_deleted = existing.title
+        s.delete(existing)
+    logger.info(f"🗑️ Deleted mechanics doc '{title_deleted}' from campaign {campaign_id}")
     return True
 
 

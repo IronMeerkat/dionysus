@@ -13,7 +13,8 @@ from logging import getLogger
 from langchain.tools import tool
 
 from database.models import Character, CharacterStatusEffect
-from database.postgres_connection import session
+from database.postgres_connection import db_session
+from sqlalchemy.exc import SQLAlchemyError
 from tools.dice import ADVANTAGE_STATES
 
 logger = getLogger(__name__)
@@ -24,13 +25,14 @@ logger = getLogger(__name__)
 # ------------------------------------------------------------------
 
 def get_character_status_effects(character_id: int) -> list[CharacterStatusEffect]:
-    """🧬 Fetch a character's permanent status effects, ordered by name."""
-    return (
-        session.query(CharacterStatusEffect)
-        .filter(CharacterStatusEffect.character_id == character_id)
-        .order_by(CharacterStatusEffect.name)
-        .all()
-    )
+    """🧬 Fetch a character's permanent status effects (detached), ordered by name."""
+    with db_session() as s:
+        return (
+            s.query(CharacterStatusEffect)
+            .filter(CharacterStatusEffect.character_id == character_id)
+            .order_by(CharacterStatusEffect.name)
+            .all()
+        )
 
 
 def upsert_character_status_effect(
@@ -50,53 +52,62 @@ def upsert_character_status_effect(
     re-casing its name. Returns the row, or None when the character or the
     advantage value is invalid.
     """
-    character = session.query(Character).filter(Character.name == character_name.strip()).first()
-    if character is None:
-        logger.warning(f"⚠️ Status effect upsert skipped: no character named '{character_name}'")
-        return None
-    if advantage not in ADVANTAGE_STATES:
-        logger.warning(f"⚠️ Status effect '{name}': unknown advantage '{advantage}'")
-        return None
-
     clean_names = [n.strip() for n in (negated_by or []) if n.strip()]
-    existing = next(
-        (e for e in character.status_effects if e.name.lower() == name.strip().lower()),
-        None,
-    )
-    if existing is None:
-        existing = CharacterStatusEffect(character_id=character.id, name=name.strip())
-        character.status_effects.append(existing)
-        logger.info(f"🧬 Creating status effect '{name}' for '{character.name}'")
-    else:
-        logger.info(f"🧬 Updating status effect '{existing.name}' for '{character.name}'")
+    try:
+        with db_session() as s:
+            character = s.query(Character).filter(Character.name == character_name.strip()).first()
+            if character is None:
+                logger.warning(f"⚠️ Status effect upsert skipped: no character named '{character_name}'")
+                return None
+            if advantage not in ADVANTAGE_STATES:
+                logger.warning(f"⚠️ Status effect '{name}': unknown advantage '{advantage}'")
+                return None
 
-    existing.description = description.strip()
-    existing.affects = affects.strip()
-    existing.roll_modifier = roll_modifier
-    existing.advantage = advantage
-    existing.negated_by = clean_names
-    existing.negation_condition = negation_condition.strip() if negation_condition else None
-    session.commit()
-    return existing
+            existing = next(
+                (e for e in character.status_effects if e.name.lower() == name.strip().lower()),
+                None,
+            )
+            if existing is None:
+                existing = CharacterStatusEffect(character_id=character.id, name=name.strip())
+                character.status_effects.append(existing)
+                logger.info(f"🧬 Creating status effect '{name}' for '{character.name}'")
+            else:
+                logger.info(f"🧬 Updating status effect '{existing.name}' for '{character.name}'")
+
+            existing.description = description.strip()
+            existing.affects = affects.strip()
+            existing.roll_modifier = roll_modifier
+            existing.advantage = advantage
+            existing.negated_by = clean_names
+            existing.negation_condition = negation_condition.strip() if negation_condition else None
+            s.flush()  # populate defaults before detach
+        return existing
+    except SQLAlchemyError:
+        logger.error(f"❌ Failed to persist status effect '{name}' for '{character_name}' (rolled back)")
+        return None
 
 
 def delete_character_status_effect(character_name: str, name: str) -> bool:
     """🗑️ Remove one permanent status effect by (character, name)."""
-    character = session.query(Character).filter(Character.name == character_name.strip()).first()
-    if character is None:
-        logger.warning(f"⚠️ Status effect delete skipped: no character named '{character_name}'")
+    try:
+        with db_session() as s:
+            character = s.query(Character).filter(Character.name == character_name.strip()).first()
+            if character is None:
+                logger.warning(f"⚠️ Status effect delete skipped: no character named '{character_name}'")
+                return False
+            existing = next(
+                (e for e in character.status_effects if e.name.lower() == name.strip().lower()),
+                None,
+            )
+            if existing is None:
+                logger.warning(f"⚠️ Status effect '{name}' not found on '{character.name}'")
+                return False
+            s.delete(existing)
+        logger.info(f"🗑️ Deleted status effect '{name}' from '{character.name}'")
+        return True
+    except SQLAlchemyError:
+        logger.error(f"❌ Failed to delete status effect '{name}' from '{character_name}' (rolled back)")
         return False
-    existing = next(
-        (e for e in character.status_effects if e.name.lower() == name.strip().lower()),
-        None,
-    )
-    if existing is None:
-        logger.warning(f"⚠️ Status effect '{name}' not found on '{character.name}'")
-        return False
-    session.delete(existing)
-    session.commit()
-    logger.info(f"🗑️ Deleted status effect '{name}' from '{character.name}'")
-    return True
 
 
 # ------------------------------------------------------------------
@@ -151,6 +162,22 @@ def character_sheet(character: Character) -> str:
     return f"{description}\n\n{effects}" if effects else description
 
 
+def character_sheet_by_id(character_id: int) -> str:
+    """📜 Freshly-fetched character sheet; safe from any thread.
+
+    Long-lived session snapshots (the socket-session Conversation roster)
+    hold detached characters whose sheets go stale mid-session; prompts
+    should render from a per-task fetch instead. Returns an empty string
+    when the character no longer exists.
+    """
+    with db_session() as s:
+        character = s.query(Character).filter(Character.id == character_id).first()
+        if character is None:
+            logger.warning(f"⚠️ character_sheet_by_id: no character with id {character_id}")
+            return ""
+        return character_sheet(character)
+
+
 def active_status_effects(
     character: Character,
     present_names: list[str],
@@ -164,6 +191,21 @@ def active_status_effects(
     present = {n.strip().lower() for n in present_names}
     return [
         e for e in character.status_effects
+        if not {n.strip().lower() for n in (e.negated_by or [])} & present
+    ]
+
+
+def filter_active_status_effects(
+    effects: list[CharacterStatusEffect],
+    present_names: list[str],
+) -> list[CharacterStatusEffect]:
+    """🚫 Same negation filter as ``active_status_effects`` but over a bare
+    effect list, so callers fetch the rows in their own task session and
+    never touch an ORM relationship owned by another session.
+    """
+    present = {n.strip().lower() for n in present_names}
+    return [
+        e for e in effects
         if not {n.strip().lower() for n in (e.negated_by or [])} & present
     ]
 
@@ -183,6 +225,26 @@ def render_active_status_effects(character: Character, present_names: list[str])
     return "\n".join(lines)
 
 
+def render_active_status_effects_by_id(
+    character_id: int,
+    character_name: str,
+    present_names: list[str],
+) -> str:
+    """🧬 Render the active (non-negated) permanent effects for a character id.
+
+    Thread-safe variant of ``render_active_status_effects``: it queries the
+    effects by ``character_id`` in its own task session instead of traversing
+    an ORM relationship, so it is safe to call from any thread.
+    """
+    effects = get_character_status_effects(character_id)
+    active = filter_active_status_effects(effects, present_names)
+    if not active:
+        return ""
+    lines = [f"Active permanent status effects ({character_name}):"]
+    lines.extend(_render_effect(e) for e in active)
+    return "\n".join(lines)
+
+
 # ------------------------------------------------------------------
 # Agent tools (builders manage sheets through these)
 # ------------------------------------------------------------------
@@ -195,14 +257,19 @@ def list_character_status_effects(character_name: str) -> str:
     campaign; use read_character for the narrative card. Returns an error
     message (never an exception) when the character is unknown.
     """
-    character = session.query(Character).filter(Character.name == character_name.strip()).first()
-    if character is None:
-        logger.warning(f"⚠️ list_character_status_effects: no character named '{character_name}'")
-        return f"❌ No character named '{character_name.strip()}'. Use list_characters to see who exists."
-    if not character.status_effects:
-        return f"🔍 '{character.name}' has no permanent status effects."
-    logger.info(f"🧬 Listed {len(character.status_effects)} status effect(s) for '{character.name}'")
-    return render_character_status_effects(character)
+    try:
+        with db_session() as s:
+            character = s.query(Character).filter(Character.name == character_name.strip()).first()
+            if character is None:
+                logger.warning(f"⚠️ list_character_status_effects: no character named '{character_name}'")
+                return f"❌ No character named '{character_name.strip()}'. Use list_characters to see who exists."
+            if not character.status_effects:
+                return f"🔍 '{character.name}' has no permanent status effects."
+            logger.info(f"🧬 Listed {len(character.status_effects)} status effect(s) for '{character.name}'")
+            return render_character_status_effects(character)
+    except SQLAlchemyError:
+        logger.error(f"❌ list_character_status_effects failed for '{character_name}'")
+        return f"❌ Could not list status effects for '{character_name.strip()}' (database error)."
 
 
 @tool

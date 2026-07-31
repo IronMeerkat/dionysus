@@ -1,4 +1,4 @@
-"""📚 Skill discovery: SKILL.md parsing plus tool and context-loader registries.
+"""📚 Skill discovery: SKILL.md parsing plus tool registry.
 
 A skill is a directory under ``skills/`` containing a ``SKILL.md`` file:
 
@@ -6,7 +6,7 @@ A skill is a directory under ``skills/`` containing a ``SKILL.md`` file:
     name: npc-building
     description: Design and persist NPC character cards for a campaign world
     tools: [list_lore_entries, read_lore_entry, create_character]
-    context_loader: lore
+    context_loaders: [lore]
     ---
     <markdown instructions, may use {var} placeholders>
 
@@ -15,26 +15,24 @@ Frontmatter fields:
   agent can decide when to activate the skill.
 - ``tools`` (optional): keys into ``TOOL_REGISTRY``. Values are either tool
   objects or a factory taking the session's ``campaign_id``.
-- ``context_loader`` (optional): key into ``CONTEXT_LOADERS``; the loader's
-  output is injected into the skill body's ``{..._context}`` placeholder.
+- ``context_loaders`` (optional): named context blocks the middleware loads
+  into ``skill_context`` under the same key (usable as ``{key}`` in the body).
+  Known keys: ``lore``, ``campaign_overview``. Singular ``context_loader`` is
+  accepted as a one-item alias.
 
 The module is deliberately free of LangChain agent imports so it can serve
 both the create_agent middleware (tool agents) and the hand-built DM graph
 nodes (classifier prompts via ``SkillRegistry.render``).
 """
-import asyncio
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
 from typing import Any
 
 import yaml
-from langchain_core.messages import AnyMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from database import knowledge
-from tools.campaign_admin import build_campaign_admin_tools, render_campaign_overview
-from tools.campaign_negotiation import build_campaign_negotiation_tools
+from tools.campaign_admin import build_campaign_admin_tools
 from tools.lore_management import (
     delete_lore_entry,
     list_lore_entries,
@@ -59,6 +57,9 @@ SKILLS_ROOT = Path(__file__).resolve().parents[2] / "skills"
 
 FRONTMATTER_DELIMITER = "---"
 
+# Context block names SkillsMiddleware knows how to load into skill_context.
+KNOWN_CONTEXT_LOADERS = frozenset({"lore", "campaign_overview"})
+
 
 @dataclass(frozen=True)
 class Skill:
@@ -68,8 +69,27 @@ class Skill:
     description: str
     body: str
     tool_names: tuple[str, ...]
-    context_loader: str | None
+    context_loaders: tuple[str, ...]
     path: Path
+
+
+def _parse_context_loaders(frontmatter: dict, path: Path) -> tuple[str, ...]:
+    """Accept ``context_loaders: [...]`` or singular ``context_loader: name``."""
+    loaders = frontmatter.get("context_loaders")
+    singular = frontmatter.get("context_loader")
+    if loaders is not None and singular is not None:
+        raise ValueError(f"❌ {path}: use context_loaders or context_loader, not both")
+    if loaders is None and singular is None:
+        return ()
+    if loaders is None:
+        loaders = [singular]
+    if not isinstance(loaders, list) or not all(isinstance(k, str) for k in loaders):
+        raise ValueError(f"❌ {path}: context_loaders must be a list of strings")
+    unknown = [k for k in loaders if k not in KNOWN_CONTEXT_LOADERS]
+    if unknown:
+        raise ValueError(f"❌ {path}: unknown context_loaders: {unknown}")
+    # Preserve order, drop duplicates.
+    return tuple(dict.fromkeys(loaders))
 
 
 def parse_skill_md(path: Path) -> Skill:
@@ -92,16 +112,12 @@ def parse_skill_md(path: Path) -> Skill:
     if unknown:
         raise ValueError(f"❌ {path}: unknown tools in frontmatter: {unknown}")
 
-    context_loader = frontmatter.get("context_loader")
-    if context_loader is not None and context_loader not in CONTEXT_LOADERS:
-        raise ValueError(f"❌ {path}: unknown context_loader '{context_loader}'")
-
     return Skill(
         name=name,
         description=description,
         body=body,
         tool_names=tuple(tool_names),
-        context_loader=context_loader,
+        context_loaders=_parse_context_loaders(frontmatter, path),
         path=path,
     )
 
@@ -125,11 +141,10 @@ TOOL_REGISTRY: dict[str, Any] = {
     "set_character_status_effect": set_character_status_effect,
     "remove_character_status_effect": remove_character_status_effect,
     "campaign_admin_tools": build_campaign_admin_tools,
-    "campaign_negotiation_tools": build_campaign_negotiation_tools,
 }
 
 # Registry entries that are factories taking campaign_id rather than tools.
-TOOL_FACTORIES = {"campaign_admin_tools", "campaign_negotiation_tools"}
+TOOL_FACTORIES = {"campaign_admin_tools"}
 
 
 def resolve_tools(skill: Skill, *, campaign_id: int | None = None) -> list:
@@ -158,56 +173,6 @@ def resolve_skill_set_tools(skills: list[Skill], *, campaign_id: int | None = No
         for tool in resolve_tools(skill, campaign_id=campaign_id):
             by_name.setdefault(tool.name, tool)
     return list(by_name.values())
-
-
-# ---------------------------------------------------------------------------
-# Context loaders
-# ---------------------------------------------------------------------------
-
-
-async def _load_lore_context(
-    messages: list[AnyMessage], *, world_name: str | None = None, **_: Any
-) -> str:
-    """📋 The world's lore entry listing (ids + titles) from Postgres."""
-    if world_name is None:
-        logger.warning("⚠️ lore context loader called without a world_name")
-        return "(no world bound to this session)"
-    world_id = await asyncio.to_thread(knowledge.get_world_id, world_name)
-    if world_id is None:
-        logger.warning(f"⚠️ World '{world_name}' not found, starting with empty context")
-        return "(world has no entries yet)"
-    entries = await asyncio.to_thread(knowledge.list_entries, world_id)
-    context = (
-        "\n".join(f"- id={e['id']} | title='{e['title']}'" for e in entries)
-        if entries
-        else "(world has no entries yet)"
-    )
-    logger.info(f"🌍 Loaded {len(entries)} lore entries for world '{world_name}'")
-    return context
-
-
-async def _load_campaign_overview(
-    messages: list[AnyMessage], *, campaign_id: int | None = None, **_: Any
-) -> str:
-    """📋 The campaign's current configuration, fresh from Postgres."""
-    if campaign_id is None:
-        logger.warning("⚠️ campaign_overview loader called without a campaign_id")
-        return "(no campaign bound to this session)"
-    overview = await asyncio.to_thread(render_campaign_overview, campaign_id)
-    logger.info(f"📋 Loaded overview for campaign {campaign_id}")
-    return overview
-
-
-CONTEXT_LOADERS: dict[str, Any] = {
-    "lore": _load_lore_context,
-    "campaign_overview": _load_campaign_overview,
-}
-
-# Maps a loader key to the template variable its output fills in skill bodies.
-LOADER_TEMPLATE_VARS = {
-    "lore": "existing_lore_context",
-    "campaign_overview": "campaign_context",
-}
 
 
 # ---------------------------------------------------------------------------

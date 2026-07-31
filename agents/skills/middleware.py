@@ -26,15 +26,14 @@ from langgraph.prebuilt import InjectedState
 from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.types import Command
 
+from tools.campaign_admin import render_campaign_overview
 from agents.skills.registry import (
-    CONTEXT_LOADERS,
-    LOADER_TEMPLATE_VARS,
-    Skill,
     SkillRegistry,
     resolve_skill_set_tools,
     resolve_tools,
     skill_registry,
 )
+from database.models.lore import LoreEntry, World
 
 logger = getLogger(__name__)
 
@@ -44,14 +43,6 @@ class SkillsState(AgentState):
 
     active_skills: Annotated[list[str], operator.add]
     skill_context: dict[str, str]
-
-
-class _LenientVars(dict):
-    """Missing template vars render as a placeholder instead of raising."""
-
-    def __missing__(self, key: str) -> str:
-        logger.warning(f"⚠️ Skill body references unknown variable '{{{key}}}'")
-        return f"({key} not available)"
 
 
 SKILLS_PREAMBLE = """You are an assistant on the Dionysus tabletop-RPG platform, equipped with skills.
@@ -127,7 +118,13 @@ class SkillsMiddleware(AgentMiddleware):
                 })
             skill = registry.get(name)
             logger.info(f"🧩 Skill '{name}' activated")
-            body = self._render_skill_body(skill, state.get("skill_context", {}))
+            ctx = state["skill_context"]
+            # Fail-secure: only the skill's declared loaders; missing keys raise.
+            body = skill.body.format(
+                world_name=self._world_name,
+                campaign_id=self._campaign_id,
+                **{key: ctx[key] for key in skill.context_loaders},
+            )
             return Command(update={
                 "active_skills": [skill.name],
                 "messages": [ToolMessage(
@@ -139,42 +136,45 @@ class SkillsMiddleware(AgentMiddleware):
         return load_skill
 
     async def abefore_agent(self, state: SkillsState, runtime) -> dict[str, Any] | None:
-        """Seed pre-activated skills and render every available skill's context
-        block (loaders are cheap single queries and shared between skills)."""
-        contexts: dict[str, str] = {}
+        """Seed pre-activated skills and load declared skill_context blocks.
+
+        Fail-secure: missing session bindings or unknown loader keys raise;
+        empty lore catalogs are allowed (valid empty data).
+        """
         loader_keys = {
-            self._registry.get(name).context_loader
+            key
             for name in self._skill_names
-        } - {None}
-        for key in loader_keys:
-            contexts[key] = await CONTEXT_LOADERS[key](
-                state.get("messages", []),
-                world_name=self._world_name,
-                campaign_id=self._campaign_id,
-            )
+            for key in self._registry.get(name).context_loaders
+        }
+        contexts: dict[str, str] = {}
+
+        if "campaign_overview" in loader_keys:
+            if self._campaign_id is None:
+                raise ValueError(
+                    "🧩 skill_context needs campaign_overview but no campaign_id is bound"
+                )
+            overview = await asyncio.to_thread(render_campaign_overview, self._campaign_id)
+            logger.info(f"📋 Loaded overview for campaign {self._campaign_id}")
+            contexts["campaign_overview"] = overview
+
+        if "lore" in loader_keys:
+            if not self._world_name:
+                raise ValueError("🧩 skill_context needs lore but no world_name is bound")
+            world = await asyncio.to_thread(World.get_world_by_name, self._world_name)
+            if world is None:
+                raise ValueError(f"🧩 World '{self._world_name}' not found")
+            entries = await asyncio.to_thread(LoreEntry.preview_entries, world)
+            contexts["lore"] = "\n".join(f"- id={e['id']} | title='{e['title']}'" for e in entries)
+            logger.info(f"🌍 Loaded {world.entry_count} lore entries for world '{self._world_name}'")
+
+        unknown = loader_keys - contexts.keys()
+        if unknown:
+            raise ValueError(f"🧩 Unsupported context_loaders: {sorted(unknown)}")
+
         if self._pre_active:
             logger.info(f"🧩 Session starts with pre-activated skills: {self._pre_active}")
         return {"active_skills": self._pre_active, "skill_context": contexts}
 
-    def _render_skill_body(self, skill: Skill, skill_context: dict[str, str]) -> str:
-        variables = _LenientVars({
-            "world_name": self._world_name or "(no world bound)",
-            "campaign_id": self._campaign_id if self._campaign_id is not None else "(no campaign bound)",
-        })
-        for loader_key, output in skill_context.items():
-            template_var = LOADER_TEMPLATE_VARS.get(loader_key)
-            if template_var:
-                variables[template_var] = output
-        return skill.body.format_map(variables)
-
-    def _compose_system_message(self, active: list[Skill], skill_context: dict[str, str]) -> SystemMessage:
-        parts = [SKILLS_PREAMBLE.format(metadata=self._registry.metadata_listing(self._skill_names))]
-        for skill in active:
-            parts.append(
-                f"ACTIVE SKILL: {skill.name}\n\n"
-                f"{self._render_skill_body(skill, skill_context)}"
-            )
-        return SystemMessage(content="\n\n---\n\n".join(parts))
 
     async def awrap_model_call(
         self,
@@ -182,12 +182,10 @@ class SkillsMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         state = request.state
-        active_names = [
-            name
-            for name in dict.fromkeys(state.get("active_skills", []))
-            if name in self._skill_names
+        active = [
+            self._registry.get(name)
+            for name in dict.fromkeys(state["active_skills"])
         ]
-        active = [self._registry.get(name) for name in active_names]
 
         active_tool_names = {
             tool.name
@@ -200,7 +198,7 @@ class SkillsMiddleware(AgentMiddleware):
         ]
 
         return await handler(request.override(
-            system_message=self._compose_system_message(active, state.get("skill_context", {})),
+            system_message=SystemMessage(content=SKILLS_PREAMBLE.format(metadata=self._registry.metadata_listing(self._skill_names))),
             tools=tools,
         ))
 

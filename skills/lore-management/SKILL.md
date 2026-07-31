@@ -11,7 +11,7 @@ Help the user build rich, interconnected lore by discussing ideas and writing co
 
 Lore library context
 The world owns a library of lore entries. Each entry is a full markdown document (a place, a faction, a history, a character, a mechanic). Below is the current listing (id + title). Do not contradict these documents unless the user explicitly asks to retcon something:
-{existing_lore_context}
+{lore}
 
 Tools
 - list_lore_entries(world_name) -- list every entry's id, title, and a short preview. Use to check what already exists.

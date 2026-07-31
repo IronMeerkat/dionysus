@@ -6,8 +6,10 @@ with validation and audit logging. No LLM ever writes state directly.
 """
 from logging import getLogger
 
+from sqlalchemy.orm import Session
+
 from database.models import FactionClock, QuestThread, WorldState
-from database.postgres_connection import session
+from database.postgres_connection import db_session
 
 logger = getLogger(__name__)
 
@@ -19,18 +21,19 @@ THREAD_ACTIONS = ("open", "progress", "resolve", "abandon")
 # ------------------------------------------------------------------
 
 def list_open_threads(campaign_id: int) -> list[QuestThread]:
-    """🧵 All open quest threads for a campaign, oldest first."""
-    return (
-        session.query(QuestThread)
-        .filter(QuestThread.campaign_id == campaign_id, QuestThread.status == "open")
-        .order_by(QuestThread.created_at)
-        .all()
-    )
+    """🧵 All open quest threads for a campaign, oldest first (detached rows)."""
+    with db_session() as s:
+        return (
+            s.query(QuestThread)
+            .filter(QuestThread.campaign_id == campaign_id, QuestThread.status == "open")
+            .order_by(QuestThread.created_at)
+            .all()
+        )
 
 
-def _find_thread(campaign_id: int, title: str) -> QuestThread | None:
+def _find_thread(s: Session, campaign_id: int, title: str) -> QuestThread | None:
     return (
-        session.query(QuestThread)
+        s.query(QuestThread)
         .filter(
             QuestThread.campaign_id == campaign_id,
             QuestThread.title.ilike(title.strip()),
@@ -49,36 +52,36 @@ def apply_thread_update(campaign_id: int, title: str, action: str, note: str = "
         logger.error(f"❌ Unknown thread action '{action}' for '{title}', skipping")
         return None
 
-    thread = _find_thread(campaign_id, title)
+    with db_session() as s:
+        thread = _find_thread(s, campaign_id, title)
 
-    if action == "open":
-        if thread is not None:
-            if thread.status != "open":
-                thread.status = "open"
-                logger.info(f"🧵 Re-opened thread '{title}' (campaign {campaign_id})")
+        if action == "open":
+            if thread is not None:
+                if thread.status != "open":
+                    thread.status = "open"
+                    logger.info(f"🧵 Re-opened thread '{title}' (campaign {campaign_id})")
+                if note:
+                    thread.notes = f"{thread.notes}\n{note}".strip()
+            else:
+                thread = QuestThread(campaign_id=campaign_id, title=title.strip(), notes=note)
+                s.add(thread)
+                logger.info(f"🧵 Opened thread '{title}' (campaign {campaign_id})")
+        elif thread is None:
+            logger.warning(f"⚠️ Thread '{title}' not found for action '{action}', opening it instead")
+            thread = QuestThread(campaign_id=campaign_id, title=title.strip(), notes=note)
+            if action in ("resolve", "abandon"):
+                thread.status = "resolved" if action == "resolve" else "abandoned"
+            s.add(thread)
+        elif action == "progress":
             if note:
                 thread.notes = f"{thread.notes}\n{note}".strip()
-        else:
-            thread = QuestThread(campaign_id=campaign_id, title=title.strip(), notes=note)
-            session.add(thread)
-            logger.info(f"🧵 Opened thread '{title}' (campaign {campaign_id})")
-    elif thread is None:
-        logger.warning(f"⚠️ Thread '{title}' not found for action '{action}', opening it instead")
-        thread = QuestThread(campaign_id=campaign_id, title=title.strip(), notes=note)
-        if action in ("resolve", "abandon"):
+            logger.info(f"🧵 Progressed thread '{title}': {note[:80]}")
+        else:  # resolve | abandon
             thread.status = "resolved" if action == "resolve" else "abandoned"
-        session.add(thread)
-    elif action == "progress":
-        if note:
-            thread.notes = f"{thread.notes}\n{note}".strip()
-        logger.info(f"🧵 Progressed thread '{title}': {note[:80]}")
-    else:  # resolve | abandon
-        thread.status = "resolved" if action == "resolve" else "abandoned"
-        if note:
-            thread.notes = f"{thread.notes}\n{note}".strip()
-        logger.info(f"🧵 Thread '{title}' marked {thread.status}")
+            if note:
+                thread.notes = f"{thread.notes}\n{note}".strip()
+            logger.info(f"🧵 Thread '{title}' marked {thread.status}")
 
-    session.commit()
     return thread
 
 
@@ -98,16 +101,17 @@ def render_threads(threads: list[QuestThread]) -> str:
 # ------------------------------------------------------------------
 
 def list_faction_clocks(campaign_id: int, include_finished: bool = False) -> list[FactionClock]:
-    """⏰ Faction clocks for a campaign (active only by default)."""
-    query = session.query(FactionClock).filter(FactionClock.campaign_id == campaign_id)
-    if not include_finished:
-        query = query.filter(FactionClock.status == "active")
-    return query.order_by(FactionClock.created_at).all()
+    """⏰ Faction clocks for a campaign (active only by default; detached rows)."""
+    with db_session() as s:
+        query = s.query(FactionClock).filter(FactionClock.campaign_id == campaign_id)
+        if not include_finished:
+            query = query.filter(FactionClock.status == "active")
+        return query.order_by(FactionClock.created_at).all()
 
 
-def _find_clock(campaign_id: int, faction_name: str) -> FactionClock | None:
+def _find_clock(s: Session, campaign_id: int, faction_name: str) -> FactionClock | None:
     return (
-        session.query(FactionClock)
+        s.query(FactionClock)
         .filter(
             FactionClock.campaign_id == campaign_id,
             FactionClock.faction_name.ilike(faction_name.strip()),
@@ -125,21 +129,22 @@ def create_faction_clock(
     next_move: str = "",
 ) -> FactionClock:
     """⏰ Start a new progress clock for a faction agenda."""
-    existing = _find_clock(campaign_id, faction_name)
-    if existing is not None and existing.goal.strip().lower() == goal.strip().lower():
-        logger.info(f"⏰ Clock for '{faction_name}' / '{goal[:60]}' already exists, reusing")
-        return existing
+    with db_session() as s:
+        existing = _find_clock(s, campaign_id, faction_name)
+        if existing is not None and existing.goal.strip().lower() == goal.strip().lower():
+            logger.info(f"⏰ Clock for '{faction_name}' / '{goal[:60]}' already exists, reusing")
+            return existing
 
-    clock = FactionClock(
-        campaign_id=campaign_id,
-        faction_name=faction_name.strip(),
-        goal=goal.strip(),
-        ticks_max=max(2, ticks_max),
-        next_move=next_move,
-    )
-    session.add(clock)
-    session.commit()
-    logger.info(f"⏰ New faction clock: '{faction_name}' -> '{goal[:80]}' (0/{clock.ticks_max})")
+        clock = FactionClock(
+            campaign_id=campaign_id,
+            faction_name=faction_name.strip(),
+            goal=goal.strip(),
+            ticks_max=max(2, ticks_max),
+            next_move=next_move,
+        )
+        s.add(clock)
+        s.flush()  # populate defaults before detach
+        logger.info(f"⏰ New faction clock: '{faction_name}' -> '{goal[:80]}' (0/{clock.ticks_max})")
     return clock
 
 
@@ -151,24 +156,24 @@ def advance_faction_clock(
     next_move: str | None = None,
 ) -> FactionClock | None:
     """⏰ Tick a faction clock forward (clamped); mark completed when it fills."""
-    clock = _find_clock(campaign_id, faction_name)
-    if clock is None:
-        logger.warning(f"⚠️ No active clock for faction '{faction_name}' (campaign {campaign_id})")
-        return None
+    with db_session() as s:
+        clock = _find_clock(s, campaign_id, faction_name)
+        if clock is None:
+            logger.warning(f"⚠️ No active clock for faction '{faction_name}' (campaign {campaign_id})")
+            return None
 
-    ticks = max(0, ticks)
-    clock.ticks_current = min(clock.ticks_max, clock.ticks_current + ticks)
-    if next_move is not None:
-        clock.next_move = next_move
-    if clock.filled:
-        clock.status = "completed"
-        logger.warning(f"🔔 Faction clock FILLED: '{clock.faction_name}' achieves '{clock.goal[:80]}'")
-    else:
-        logger.info(
-            f"⏰ '{clock.faction_name}' +{ticks} -> {clock.ticks_current}/{clock.ticks_max}"
-            + (f" ({reason[:80]})" if reason else "")
-        )
-    session.commit()
+        ticks = max(0, ticks)
+        clock.ticks_current = min(clock.ticks_max, clock.ticks_current + ticks)
+        if next_move is not None:
+            clock.next_move = next_move
+        if clock.filled:
+            clock.status = "completed"
+            logger.warning(f"🔔 Faction clock FILLED: '{clock.faction_name}' achieves '{clock.goal[:80]}'")
+        else:
+            logger.info(
+                f"⏰ '{clock.faction_name}' +{ticks} -> {clock.ticks_current}/{clock.ticks_max}"
+                + (f" ({reason[:80]})" if reason else "")
+            )
     return clock
 
 
@@ -188,17 +193,17 @@ def render_clocks(clocks: list[FactionClock]) -> str:
 # ------------------------------------------------------------------
 
 def get_world_state(campaign_id: int) -> WorldState | None:
-    """🌍 Fetch the campaign's world state row, or None if it does not exist."""
-    return session.query(WorldState).filter(WorldState.campaign_id == campaign_id).first()
+    """🌍 Fetch the campaign's world state row (detached), or None."""
+    with db_session() as s:
+        return s.query(WorldState).filter(WorldState.campaign_id == campaign_id).first()
 
 
-def ensure_world_state(campaign_id: int) -> WorldState:
-    """🌍 Get the campaign's world state row, creating an empty one if missing."""
-    world_state = get_world_state(campaign_id)
+def _ensure_world_state(s: Session, campaign_id: int) -> WorldState:
+    world_state = s.query(WorldState).filter(WorldState.campaign_id == campaign_id).first()
     if world_state is None:
         world_state = WorldState(campaign_id=campaign_id)
-        session.add(world_state)
-        session.commit()
+        s.add(world_state)
+        s.flush()
         logger.info(f"🌍 Created world_state row for campaign {campaign_id}")
     return world_state
 
@@ -207,11 +212,10 @@ def set_location(campaign_id: int, location: str) -> None:
     """📍 Update the campaign's current scene location."""
     if not location or not location.strip():
         return
-    world_state = ensure_world_state(campaign_id)
-    world_state.location = location.strip()
-    session.add(world_state)
-    session.commit()
-    logger.info(f"📍 Location set to '{world_state.location}' (campaign {campaign_id})")
+    with db_session() as s:
+        world_state = _ensure_world_state(s, campaign_id)
+        world_state.location = location.strip()
+    logger.info(f"📍 Location set to '{location.strip()}' (campaign {campaign_id})")
 
 
 # ------------------------------------------------------------------
@@ -222,8 +226,7 @@ def set_world_clock(campaign_id: int, new_value: str) -> None:
     """🕰️ Advance the narrative clock for a campaign."""
     if not new_value or not new_value.strip():
         return
-    world_state = ensure_world_state(campaign_id)
-    world_state.world_clock = new_value.strip()
-    session.add(world_state)
-    session.commit()
-    logger.info(f"🕰️ World clock set to '{world_state.world_clock}' (campaign {campaign_id})")
+    with db_session() as s:
+        world_state = _ensure_world_state(s, campaign_id)
+        world_state.world_clock = new_value.strip()
+    logger.info(f"🕰️ World clock set to '{new_value.strip()}' (campaign {campaign_id})")

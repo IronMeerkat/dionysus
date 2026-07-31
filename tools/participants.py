@@ -18,9 +18,10 @@ from typing import Any
 
 import json
 
+from sqlalchemy.orm import Session
+
 from database.models import CampaignParticipant, Character
-from database.models.participants import DEFAULT_PARTICIPANT_STATE
-from database.postgres_connection import session
+from database.postgres_connection import db_session
 
 logger = getLogger(__name__)
 
@@ -29,10 +30,9 @@ logger = getLogger(__name__)
 # Lookups + ensure
 # ------------------------------------------------------------------
 
-def get_campaign_participant(campaign_id: int, character_id: int) -> CampaignParticipant | None:
-    """🎲 Fetch a character's campaign state row, or None."""
+def _query_participant(s: Session, campaign_id: int, character_id: int) -> CampaignParticipant | None:
     return (
-        session.query(CampaignParticipant)
+        s.query(CampaignParticipant)
         .filter(
             CampaignParticipant.campaign_id == campaign_id,
             CampaignParticipant.character_id == character_id,
@@ -41,16 +41,22 @@ def get_campaign_participant(campaign_id: int, character_id: int) -> CampaignPar
     )
 
 
+def get_campaign_participant(campaign_id: int, character_id: int) -> CampaignParticipant | None:
+    """🎲 Fetch a character's campaign state row (detached), or None."""
+    with db_session() as s:
+        return _query_participant(s, campaign_id, character_id)
+
+
 def ensure_campaign_participant(campaign_id: int, character_id: int) -> CampaignParticipant:
-    """🎲 Get a character's campaign state row, creating an empty one if missing."""
-    row = get_campaign_participant(campaign_id, character_id)
-    if row is not None:
+    """🎲 Get a character's campaign state row (detached), creating an empty one if missing."""
+    with db_session() as s:
+        row = _query_participant(s, campaign_id, character_id)
+        if row is None:
+            row = CampaignParticipant(campaign_id=campaign_id, character_id=character_id)
+            s.add(row)
+            s.flush()
+            logger.info(f"🎲 Created campaign_participants row (campaign {campaign_id}, character {character_id})")
         return row
-    row = CampaignParticipant(campaign_id=campaign_id, character_id=character_id)
-    session.add(row)
-    session.commit()
-    logger.info(f"🎲 Created campaign_participants row (campaign {campaign_id}, character {character_id})")
-    return row
 
 
 # ------------------------------------------------------------------
@@ -199,12 +205,17 @@ def _normalise_state(state: dict | None) -> dict:
     return state
 
 
-def _resolve_participant(campaign_id: int, name: str) -> CampaignParticipant | None:
-    """Find the campaign state row for a named character, or None."""
-    character = session.query(Character).filter(Character.name == name).first()
+def _resolve_participant(s: Session, campaign_id: int, name: str) -> CampaignParticipant | None:
+    """Find (creating if needed) the campaign state row for a named character."""
+    character = s.query(Character).filter(Character.name == name).first()
     if character is None:
         return None
-    return ensure_campaign_participant(campaign_id, character.id)
+    row = _query_participant(s, campaign_id, character.id)
+    if row is None:
+        row = CampaignParticipant(campaign_id=campaign_id, character_id=character.id)
+        s.add(row)
+        s.flush()
+    return row
 
 
 def apply_participant_state_update(
@@ -227,56 +238,55 @@ def apply_participant_state_update(
     carries. The blob is reassigned so SQLAlchemy persists the JSONB change.
     Returns the updated row, or None if the character could not be resolved.
     """
-    row = _resolve_participant(campaign_id, name.strip())
-    if row is None:
-        logger.warning(f"⚠️ Participant state update skipped: no character named '{name}' in campaign {campaign_id}")
-        return None
+    with db_session() as s:
+        row = _resolve_participant(s, campaign_id, name.strip())
+        if row is None:
+            logger.warning(f"⚠️ Participant state update skipped: no character named '{name}' in campaign {campaign_id}")
+            return None
 
-    state = _normalise_state(row.state)
-    changed = False
+        state = _normalise_state(row.state)
+        changed = False
 
-    for key, value in (stats_set or {}).items():
-        state["stats"][key] = value
-        changed = True
+        for key, value in (stats_set or {}).items():
+            state["stats"][key] = value
+            changed = True
 
-    effects = [e for e in (_normalise_effect(x) for x in (state["status_effects"] or [])) if e["name"]]
-    lower_existing = {e["name"].lower(): e for e in effects}
-    for add in (status_added or []):
-        entry = _normalise_effect(add)
-        key = entry["name"].lower()
-        if not key:
-            continue
-        if key in lower_existing:
-            mechanics = {k: v for k, v in entry.items() if k != "name"}
-            if mechanics:
-                lower_existing[key].update(mechanics)
+        effects = [e for e in (_normalise_effect(x) for x in (state["status_effects"] or [])) if e["name"]]
+        lower_existing = {e["name"].lower(): e for e in effects}
+        for add in (status_added or []):
+            entry = _normalise_effect(add)
+            key = entry["name"].lower()
+            if not key:
+                continue
+            if key in lower_existing:
+                mechanics = {k: v for k, v in entry.items() if k != "name"}
+                if mechanics:
+                    lower_existing[key].update(mechanics)
+                    changed = True
+            else:
+                effects.append(entry)
+                lower_existing[key] = entry
                 changed = True
-        else:
-            effects.append(entry)
-            lower_existing[key] = entry
+        for rem in (status_removed or []):
+            rem = rem.strip().lower()
+            if rem and rem in lower_existing:
+                effects = [e for e in effects if e["name"].lower() != rem]
+                del lower_existing[rem]
+                changed = True
+        state["status_effects"] = effects
+
+        for key, value in (modifiers_set or {}).items():
+            state["modifiers"][key] = value
             changed = True
-    for rem in (status_removed or []):
-        rem = rem.strip().lower()
-        if rem and rem in lower_existing:
-            effects = [e for e in effects if e["name"].lower() != rem]
-            del lower_existing[rem]
+
+        if notes is not None:
+            state["notes"] = notes
             changed = True
-    state["status_effects"] = effects
 
-    for key, value in (modifiers_set or {}).items():
-        state["modifiers"][key] = value
-        changed = True
+        if not changed:
+            logger.info(f"📋 Participant state update for '{name}' was empty, nothing changed")
+            return row
 
-    if notes is not None:
-        state["notes"] = notes
-        changed = True
-
-    if not changed:
-        logger.info(f"📋 Participant state update for '{name}' was empty, nothing changed")
-        return row
-
-    row.state = state
-    session.add(row)
-    session.commit()
-    logger.info(f"📋 Updated '{name}' state in campaign {campaign_id}: {state}")
+        row.state = state
+        logger.info(f"📋 Updated '{name}' state in campaign {campaign_id}: {state}")
     return row

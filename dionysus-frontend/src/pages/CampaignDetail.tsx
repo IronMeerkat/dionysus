@@ -121,15 +121,6 @@ const CampaignDetail = () => {
             type="button"
             className="btn btn-primary btn-outline btn-sm"
             onClick={() =>
-              navigate(`/campaign-negotiation?campaign_id=${campaign.id}`)
-            }
-          >
-            Negotiate Campaign
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-outline btn-sm"
-            onClick={() =>
               navigate(`/campaign-admin?campaign_id=${campaign.id}`)
             }
           >

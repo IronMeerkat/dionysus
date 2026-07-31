@@ -13,7 +13,6 @@ import CreateCampaign from './pages/CreateCampaign';
 import CharacterMemories from './pages/CharacterMemories';
 import NPCBuilderChat from './pages/NPCBuilderChat';
 import CampaignAdminChat from './pages/CampaignAdminChat';
-import CampaignNegotiationChat from './pages/CampaignNegotiationChat';
 
 async function loadFlyonUI() {
   return import('flyonui/flyonui');
@@ -57,7 +56,6 @@ function App() {
         <Route path="/campaigns/new" element={<CreateCampaign />} />
         <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/campaign-admin" element={<CampaignAdminChat />} />
-        <Route path="/campaign-negotiation" element={<CampaignNegotiationChat />} />
         <Route path="/campaigns/:campaignId/npcs/:npcId/memories" element={<CharacterMemories />} />
       </Routes>
     </div>

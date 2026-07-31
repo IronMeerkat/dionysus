@@ -11,7 +11,7 @@ Collaborate with the user across multiple turns to design NPCs that fit naturall
 
 Lore library context
 The world owns a library of lore entries (full markdown documents). Below is the current listing (id + title). Treat these documents as canonical; do not contradict them unless the user explicitly asks to retcon something:
-{existing_lore_context}
+{lore}
 
 ## W++ CHARACTER FORMAT
 

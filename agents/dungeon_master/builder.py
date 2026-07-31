@@ -6,9 +6,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import BuildReview, DungeonMasterState
 from agents.skilled_agent import WORLD_SKILLS, spawn_skilled_agent
-from database.models import Character as CharacterModel
-from database.postgres_connection import session as db_session
-from tools.participants import ensure_campaign_participant
+from database.models import CampaignParticipant, Character as CharacterModel
+from database.postgres_connection import db_session
 from utils.llm_models import dm_planner_model
 from utils.prompts import dm_npc_reviewer_prompt_template
 
@@ -46,11 +45,9 @@ def make_builder_nodes(ctx: DMContext) -> dict:
             result = await builder_graph.ainvoke({"messages": transcript})
             delta = result["messages"][len(transcript):]
         except Exception:
-            # A returning NPC makes create_character hit the unique-name
-            # constraint and abort the shared session's transaction. Roll it
-            # back so downstream nodes (npc_registrar) can query/write again.
+            # Every DB tool opens its own task session and rolls itself back,
+            # so a failed builder turn cannot poison downstream nodes.
             logger.exception(f"💥 NPC builder graph failed for '{intro.name}'")
-            db_session.rollback()
             delta = []
 
         created = any(isinstance(m, ToolMessage) and m.name == "create_character" for m in delta)
@@ -106,28 +103,23 @@ def make_builder_nodes(ctx: DMContext) -> dict:
         """
         intro = state.build_queue[0]
 
-        character = db_session.query(CharacterModel).filter(
-            CharacterModel.name == intro.name
-        ).first()
+        with db_session() as s:
+            character = s.query(CharacterModel).filter(
+                CharacterModel.name == intro.name
+            ).first()
         if character is None:
             logger.error(
                 f"❌ NPC '{intro.name}' not found in DB; cannot register into "
-                f"campaign {ctx.campaign.id}"
+                f"campaign {ctx.campaign_id}"
             )
         else:
             ctx.conversation.add_character(character)
             ctx.conversation._npcs_introduced = True
-            ensure_campaign_participant(ctx.campaign.id, character.id)
-            if state.build_created:
-                logger.info(
-                    f"🎭 Newly built NPC '{intro.name}' introduced to scene "
-                    f"(campaign {ctx.campaign.id}, state row ensured)"
-                )
-            else:
-                logger.info(
-                    f"🎭 Existing NPC '{intro.name}' introduced to scene "
-                    f"(campaign {ctx.campaign.id}, state row ensured, no rebuild needed)"
-                )
+            CampaignParticipant.get_or_create(campaign_id=ctx.campaign_id, character_id=character.id)
+            logger.info(
+                f"🎭 NPC '{intro.name}' introduced to scene "
+                f"(campaign {ctx.campaign_id}, state row ensured)"
+            )
 
         return {
             "messages": [],

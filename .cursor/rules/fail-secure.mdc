@@ -1,0 +1,47 @@
+---
+description: Fail-secure over fail-safe — catch, log, recover; never invent success
+alwaysApply: true
+---
+
+# Fail-secure design (hard preference)
+
+Hate fail-safe. Love fail-secure.
+
+## Fail-safe (FORBIDDEN)
+
+- Paper over failures with invented defaults, empty "success" values, or silent continue
+- Bare `except:` / `except Exception: pass` with no log
+- Letting uncaught exceptions kill the whole process/server
+- Pretending a classifier, tool, or write succeeded when it did not
+
+## Fail-secure (REQUIRED)
+
+1. **Contracts / config / missing required data**: raise loudly. Do not invent bindings, keys, or placeholders to keep going.
+2. **Runtime exceptions at boundaries** (request handlers, socket events, graph nodes, tools): catch → **log** (with emoji + context) → return / go back. Do not crash the program.
+3. **Every catch must log or print** before returning or re-raising. Never continue as if nothing happened.
+
+## Examples
+
+```python
+# ❌ FAIL-SAFE — invent success
+except Exception:
+    return IntentReading(intent_type="dialogue", ...)
+
+# ❌ FAIL-SAFE — silent swallow
+except Exception:
+    pass
+
+# ❌ FAIL-SAFE — kill the process
+# (uncaught exception escapes the request/event boundary)
+
+# ✅ FAIL-SECURE — contract: missing required data raises
+if campaign_id is None:
+    raise ValueError("🧩 campaign_id required")
+
+# ✅ FAIL-SECURE — boundary: catch, log, go back
+try:
+    result = await do_work()
+except Exception:
+    logger.exception("💥 work failed; recovering")
+    return None  # or error payload / empty update — never fake success
+```

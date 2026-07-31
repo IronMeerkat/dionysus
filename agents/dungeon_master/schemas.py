@@ -263,7 +263,8 @@ class DMPlan(BaseModel):
         "none -- leave None whenever NPC dialogue alone carries the moment."))
     responding_npcs: list[NPCDirective] = Field(default_factory=list, description=(
         "Ordered list of NPCs that should respond this turn, with per-NPC guidance. "
-        "Empty if no NPC should speak."))
+        "Empty if no NPC should speak. Soft cap ~sqrt(active NPC count) -- "
+        "do not fire the whole cast at once; pick the most relevant voices."))
     npcs_to_introduce: list[NPCIntroduction] = Field(default_factory=list, description=(
         "New NPCs to create and add to the scene. Empty if no new NPCs are needed."))
     closing_narration: str | None = Field(default=None, description=(

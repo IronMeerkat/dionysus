@@ -17,9 +17,8 @@ from agents.dungeon_master.schemas import (
     SceneChangeReport,
     SceneSummary,
 )
-from database.knowledge import save_stream_items
 from database.models import DMSecret, PlayerPreference, WorldEvent
-from tools.mechanics import get_mechanic, upsert_mechanic
+from tools.mechanics import get_mechanic, list_mechanics, render_mechanics_full, upsert_mechanic
 from tools.world_state import (
     advance_faction_clock,
     create_faction_clock,
@@ -58,7 +57,12 @@ def make_turn_epilogue(ctx: DMContext):
 
     async def _run_scene_change_check(recent: list[AnyMessage]) -> SceneChangeReport | None:
         """🧭 Ask the scene-change detector for a verdict plus state consequences."""
-        mechanics_docs = await asyncio.to_thread(lambda: ctx.mechanics)
+        # Read the mechanics docs on the worker thread, but pass the snapshot
+        # campaign_id so no expired ORM attribute is lazily reloaded off the
+        # event loop's single shared Session.
+        mechanics_docs = await asyncio.to_thread(
+            lambda: render_mechanics_full(list_mechanics(ctx.campaign_id))
+        )
         report = await run_classifier(
             "dm-scene-change",
             SceneChangeReport,
@@ -69,7 +73,6 @@ def make_turn_epilogue(ctx: DMContext):
                 "mechanics_docs": mechanics_docs or "(no negotiated mechanics documents)",
                 "messages": recent[-SCENE_WINDOW:],
             },
-            fallback=None,
             label="scene_change",
         )
         if report is not None:
@@ -87,25 +90,25 @@ def make_turn_epilogue(ctx: DMContext):
         """
         if report.location:
             try:
-                await asyncio.to_thread(set_location, ctx.campaign.id, report.location)
+                await asyncio.to_thread(set_location, ctx.campaign_id, report.location)
             except Exception:
                 logger.exception(f"💥 Failed to apply scene-change location '{report.location}'")
         if report.world_clock:
             try:
-                await asyncio.to_thread(set_world_clock, ctx.campaign.id, report.world_clock)
+                await asyncio.to_thread(set_world_clock, ctx.campaign_id, report.world_clock)
             except Exception:
                 logger.exception(f"💥 Failed to apply scene-change world clock '{report.world_clock}'")
         applied: list[str] = []
         for update in report.mechanics_updates:
             try:
-                existing = await asyncio.to_thread(get_mechanic, ctx.campaign.id, update.title)
+                existing = await asyncio.to_thread(get_mechanic, ctx.campaign_id, update.title)
                 if existing is None:
                     logger.warning(
                         f"⚠️ Scene-change updater named unknown mechanics doc "
                         f"'{update.title}', skipping"
                     )
                     continue
-                await asyncio.to_thread(upsert_mechanic, ctx.campaign.id, update.title, update.content)
+                await asyncio.to_thread(upsert_mechanic, ctx.campaign_id, update.title, update.content)
                 applied.append(existing.title)
             except Exception:
                 logger.exception(f"💥 Failed to update mechanics doc '{update.title}'")
@@ -127,9 +130,9 @@ def make_turn_epilogue(ctx: DMContext):
         events.extend(summary.canon_updates)
         events.extend(summary.npc_updates)
         events.extend(f"Unresolved hook: {hook}" for hook in summary.unresolved_hooks)
-        await save_stream_items(WorldEvent, ctx.campaign.id, events)
+        await WorldEvent.add_items(ctx.campaign_id, events)
         if summary.player_preferences:
-            await save_stream_items(PlayerPreference, ctx.campaign.id, [summary.player_preferences])
+            await PlayerPreference.add_items(ctx.campaign_id, [summary.player_preferences])
         logger.info(
             f"🧾 Scene summarized: {len(summary.canon_updates)} canon update(s), "
             f"{len(summary.unresolved_hooks)} hook(s)"
@@ -137,8 +140,8 @@ def make_turn_epilogue(ctx: DMContext):
 
     async def _run_faction_simulation(turn_summary: str, world_events: str, secrets: str, lore: str) -> None:
         """🌒 Advance offscreen faction agendas in response to the turn."""
-        clocks = list_faction_clocks(ctx.campaign.id)
-        threads = list_open_threads(ctx.campaign.id)
+        clocks = list_faction_clocks(ctx.campaign_id)
+        threads = list_open_threads(ctx.campaign_id)
         prompt = await dm_faction_prompt_template.ainvoke({
             "faction_clocks": render_clocks(clocks),
             "open_threads": render_threads(threads),
@@ -153,18 +156,18 @@ def make_turn_epilogue(ctx: DMContext):
 
         for advance in sim.clock_advances:
             advance_faction_clock(
-                ctx.campaign.id, advance.faction, advance.ticks,
+                ctx.campaign_id, advance.faction, advance.ticks,
                 reason=advance.reason, next_move=advance.next_move,
             )
         for new_clock in sim.new_clocks:
             create_faction_clock(
-                ctx.campaign.id, new_clock.faction_name, new_clock.goal,
+                ctx.campaign_id, new_clock.faction_name, new_clock.goal,
                 ticks_max=new_clock.ticks_max, next_move=new_clock.next_move,
             )
         if sim.world_events:
-            await save_stream_items(WorldEvent, ctx.campaign.id, sim.world_events)
+            await WorldEvent.add_items(ctx.campaign_id, sim.world_events)
         if sim.secret_notes:
-            await save_stream_items(DMSecret, ctx.campaign.id, [sim.secret_notes])
+            await DMSecret.add_items(ctx.campaign_id, [sim.secret_notes])
         logger.info(
             f"🌒 Faction simulation: {len(sim.clock_advances)} tick(s), "
             f"{len(sim.new_clocks)} new clock(s), {len(sim.world_events)} event(s)"

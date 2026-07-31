@@ -8,10 +8,22 @@ from langchain_core.runnables import RunnableConfig
 from agents.dungeon_master import NARRATOR_NAME, spawn_dungeon_master
 from api.stream_handler import SocketStreamHandler
 from database.models.conversation import Conversation
-from database.postgres_connection import session as db_session
+from database.postgres_connection import db_session
 from hephaestus.langfuse_handler import langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
+
+# Live game sessions: conversation_id -> the detached Conversation snapshot a
+# socket client is playing on. REST endpoints that mutate messages use this to
+# patch the in-memory message buffer -- the old shared-session identity map
+# used to hand them the very same object, but per-task sessions make every
+# query return a distinct instance.
+_LIVE_CONVERSATIONS: dict[int, Conversation] = {}
+
+
+def get_live_conversation(conversation_id: int) -> Conversation | None:
+    """🎮 The in-memory Conversation a live socket session is playing, if any."""
+    return _LIVE_CONVERSATIONS.get(conversation_id)
 
 
 def register_events(sio: socketio.AsyncServer) -> None:
@@ -39,7 +51,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
             return
 
         try:
-            conversation = db_session.query(Conversation).filter(Conversation.id == conversation_id).first()
+            conversation = Conversation.get(id=conversation_id)
             if conversation is None:
                 await sio.emit("error", {"message": f"Conversation {conversation_id} not found."}, to=sid)
                 return
@@ -54,6 +66,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
                 "conversation": conversation,
                 "graph": graph,
             })
+            _LIVE_CONVERSATIONS[conversation.id] = conversation
 
             character_list = [c.name for c in conversation.characters]
             logger.info(f"🎮 init_session from {sid}: player={conversation.player.name} characters={character_list}")
@@ -78,11 +91,11 @@ def register_events(sio: socketio.AsyncServer) -> None:
         logger.info(f"💬 send_message from {sid}: {content[:120]}")
 
         sock_session = await sio.get_session(sid)
-        conversation: Conversation | None = sock_session.get("conversation")
+        conversation: Conversation | None = sock_session.get("conversation") 
         graph = sock_session.get("graph")
 
         if conversation is None:
-            conversation = db_session.query(Conversation).filter(Conversation.id == data.get("conversation_id")).first()
+            conversation = Conversation.get(id=data.get("conversation_id"))
             if conversation is None:
                 logger.error(f"❌ No conversation found for sid={sid}")
                 await sio.emit("error", {"message": "No conversation found."}, to=sid)
@@ -90,6 +103,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
             await sio.save_session(sid, {
                 "conversation": conversation,
             })
+            _LIVE_CONVERSATIONS[conversation.id] = conversation
         if conversation.id != data.get("conversation_id"):
             logger.error(f"❌ Conversation ID mismatch for sid={sid}")
             await sio.emit("error", {"message": "Conversation ID mismatch."}, to=sid)

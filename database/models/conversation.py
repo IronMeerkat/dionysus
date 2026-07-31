@@ -3,16 +3,20 @@ from datetime import datetime, timezone
 from logging import getLogger
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table, Text
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import UUID, insert as pg_insert
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import reconstructor, relationship
 
-from database.postgres_connection import Base, session
+from database.postgres_connection import Base, Session, db_session
 from database.models import Character
+from hephaestus.settings import settings
 
 
 logger = getLogger(__name__)
+
+EMBED_DIM = settings.memory.embed_dim
 
 # ------------------------------------------------------------------
 # Association table: which characters participate in a conversation
@@ -46,6 +50,7 @@ class Message(Base):
     role = Column(String, nullable=False)  # "human" | "ai" | "system"
     speaker_name = Column(String, nullable=True)  # e.g. character or player name
     content = Column(Text, nullable=False)
+    embedding = Column(Vector(EMBED_DIM), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     conversation = relationship("Conversation", back_populates="messages")
 
@@ -135,11 +140,32 @@ class Conversation(Base):
     # ------------------------------------------------------------------
 
     def add_character(self, character: object) -> None:
-        """🎭 Add a character to this conversation's participants."""
-        if character not in self.characters:
-            self.characters.append(character)
-            logger.info(
-                f"🎭 Character '{character.name}' joined conversation {self.id}"
+        """🎭 Add a character to this conversation's participants.
+
+        Always appends to the in-memory roster; when the conversation row
+        already exists the association is also upserted in its own task
+        session (live-snapshot Conversation objects are detached and cannot
+        flush themselves). Deduplicates by character id, since the snapshot
+        roster holds detached instances where identity comparison is useless.
+        """
+        if any(c.id == character.id for c in self.characters):
+            return
+        self.characters.append(character)
+        logger.info(
+            f"🎭 Character '{character.name}' joined conversation {self.id}"
+        )
+        if self.id is None:
+            return  # transient: create() persists the roster via cascade
+        try:
+            with db_session() as s:
+                s.execute(
+                    pg_insert(conversation_characters)
+                    .values(conversation_id=self.id, character_id=character.id)
+                    .on_conflict_do_nothing()
+                )
+        except SQLAlchemyError:
+            logger.error(
+                f"❌ Failed to persist '{character.name}' joining conversation {self.id}"
             )
 
     # def remove_character(self, character: object) -> None:
@@ -156,7 +182,7 @@ class Conversation(Base):
     # Message helpers
     # ------------------------------------------------------------------
 
-    def add_message(self, role: str, content: str, speaker_name: str, _id: uuid.UUID | None = None) -> "Message | None":
+    def add_message(self, role: str, content: str, speaker_name: str, _id: uuid.UUID | None = None, embedding: list[float] | None = None) -> "Message | None":
         """💬 Append a new message to this conversation.
 
         Args:
@@ -165,30 +191,47 @@ class Conversation(Base):
             speaker_name: Display name (character / player).
             id: Optional UUID to use for this message. When provided the same
                 UUID that was emitted to the frontend is written to the DB.
+            embedding: Optional precomputed embedding vector for semantic
+                recall of past play. Stored as-is on the row; ``None`` leaves
+                the message unindexed by vector search.
 
         Returns:
             The newly created Message instance, or None if skipped (duplicate UUID).
         """
         _id = _id or uuid.uuid4()
-        msg = Message(id=_id, role=role, content=content, speaker_name=speaker_name)
+        msg = Message(id=_id, conversation_id=self.id, role=role, content=content, speaker_name=speaker_name, embedding=embedding)
+        # In-memory append keeps the live session's snapshot in sync with the
+        # DB; the write below uses its own short-lived session (hand-rolled
+        # rather than db_session() because a duplicate UUID is an expected,
+        # quietly-skippable outcome, not a 💥 worth logging a trace for).
         self.messages.append(msg)
-        session.add(msg)
-        session.add(self)
+        # The relationship append back-referenced the (detached) conversation;
+        # drop it so the writer session inserts the row by FK alone instead of
+        # cascading the whole detached snapshot graph into itself.
+        msg.conversation = self
+        s = Session()
         try:
-            session.commit()
+            s.add(msg)
+            s.commit()
             logger.info(
                 f"💬 [{role}] message added to conversation {self.id} "
                 f"(speaker={speaker_name})"
             )
             return msg
         except IntegrityError as exc:
-            session.rollback()
-            
+            s.rollback()
             if "duplicate key" in str(exc).lower() or "unique constraint" in str(exc).lower():
                 self.messages.remove(msg)
                 logger.warning(f"⚠️ Duplicate message UUID, skipping add (id={msg.id})")
                 return None
-            raise exc
+            logger.exception(f"💥 Failed to persist message in conversation {self.id}")
+            raise
+        except SQLAlchemyError:
+            s.rollback()
+            logger.exception(f"💥 Failed to persist message in conversation {self.id}")
+            raise
+        finally:
+            s.close()
 
     # ------------------------------------------------------------------
     # AgentSwarmState conversion
@@ -202,16 +245,25 @@ class Conversation(Base):
     def create(cls, player: Character, characters: list[Character], campaign_id: int) -> "Conversation":
         """🎭 Create a new conversation between a player character and one or more NPCs.
 
+        The given characters are re-attached inside the task session (they
+        are typically detached results of an earlier query), so only their
+        ids/names need to be readable. The returned conversation is detached
+        with its player/characters/messages loaded for immediate rendering.
+
         Scene location, story background, and narrative time are owned by the
         campaign / its world state, not the conversation, so they are not set here.
         """
-        conversation = cls(player=player, campaign_id=campaign_id)
+        with db_session() as s:
+            db_player = s.get(Character, player.id)
+            db_characters = s.query(Character).filter(Character.id.in_([c.id for c in characters])).all()
+            conversation = cls(player=db_player, campaign_id=campaign_id)
 
-        for character in characters:
-            conversation.add_character(character)
-        conversation.title = f"{player.name} {', '.join([c.name for c in characters])}"
-        session.add(conversation)
-        session.commit()
+            for character in db_characters:
+                conversation.add_character(character)
+            conversation.title = f"{db_player.name} {', '.join([c.name for c in db_characters])}"
+            s.add(conversation)
+            s.flush()  # assign the id before detach
+            _ = conversation.messages  # initialise the collection for the detached snapshot
         return conversation
 
     def __repr__(self) -> str:

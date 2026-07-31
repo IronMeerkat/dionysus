@@ -7,8 +7,8 @@ from langchain_core.messages import HumanMessage
 
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import DungeonMasterState
-from database.knowledge import save_stream_items
 from database.models import DMSecret, WorldEvent
+from database.session_utils import embedder
 from tools.participants import apply_participant_state_update
 from tools.world_state import advance_faction_clock, apply_thread_update, set_location, set_world_clock
 from utils.tasks import fire_and_forget
@@ -25,14 +25,16 @@ def make_canon_manager(ctx: DMContext):
         if not plan:
             return {"messages": []}
 
+        campaign_id = ctx.campaign_id
+
         if plan.new_world_events:
-            fire_and_forget(save_stream_items(WorldEvent, ctx.campaign.id, plan.new_world_events))
+            fire_and_forget(WorldEvent.add_items(campaign_id, plan.new_world_events))
         if plan.secret_notes:
-            fire_and_forget(save_stream_items(DMSecret, ctx.campaign.id, [plan.secret_notes]))
+            fire_and_forget(DMSecret.add_items(campaign_id, [plan.secret_notes]))
         if plan.time_location_update:
-            await asyncio.to_thread(set_location, ctx.campaign.id, plan.time_location_update)
+            await asyncio.to_thread(set_location, campaign_id, plan.time_location_update)
         if plan.world_clock_update:
-            await asyncio.to_thread(set_world_clock, ctx.campaign.id, plan.world_clock_update)
+            await asyncio.to_thread(set_world_clock, campaign_id, plan.world_clock_update)
 
         # The three independent write loops run concurrently off the event
         # loop. Each loop only catches/logs its own errors so one failure
@@ -40,7 +42,7 @@ def make_canon_manager(ctx: DMContext):
         def _apply_threads() -> None:
             for update in plan.thread_updates:
                 try:
-                    apply_thread_update(ctx.campaign.id, update.title, update.action, update.note)
+                    apply_thread_update(campaign_id, update.title, update.action, update.note)
                 except Exception:
                     logger.exception(f"💥 Failed to apply thread update '{update.title}' ({update.action})")
 
@@ -48,7 +50,7 @@ def make_canon_manager(ctx: DMContext):
             for advance in plan.clock_advances:
                 try:
                     advance_faction_clock(
-                        ctx.campaign.id, advance.faction, advance.ticks,
+                        campaign_id, advance.faction, advance.ticks,
                         reason=advance.reason, next_move=advance.next_move,
                     )
                 except Exception:
@@ -58,7 +60,7 @@ def make_canon_manager(ctx: DMContext):
             for update in plan.participant_state_updates:
                 try:
                     apply_participant_state_update(
-                        ctx.campaign.id,
+                        campaign_id,
                         name=update.name,
                         stats_set=update.stats_set,
                         status_added=[s.model_dump(exclude_none=True) for s in update.status_added],
@@ -82,12 +84,40 @@ def make_canon_manager(ctx: DMContext):
 
 def make_persist_messages(ctx: DMContext):
     async def persist_messages(state: DungeonMasterState) -> dict:
-        """Write all messages from this turn to the DB and message buffer."""
+        """Write all messages from this turn to the DB and message buffer.
+
+        Each human/ai message is embedded (best-effort) before the row is
+        committed so the campaign-admin agent can later recall it via the
+        ``search_campaign_messages`` vector tool. System messages are skipped
+        -- they are instructions, not play, and would only pollute recall.
+        """
+        embeddable = [m for m in state.messages if m.type in ("human", "ai")]
+        vectors = await asyncio.gather(
+            *(embedder.aembed_query(m.content) for m in embeddable),
+            return_exceptions=True,
+        )
+        vector_by_id: dict[str, list[float] | None] = {}
+        for msg, result in zip(embeddable, vectors):
+            if isinstance(result, Exception):
+                logger.warning(
+                    f"⚠️ [persist_messages] embedding failed for message {msg.id}: "
+                    f"{type(result).__name__}: {result}"
+                )
+                vector_by_id[msg.id] = None
+            else:
+                vector_by_id[msg.id] = result
+
         for message in state.messages:
             message.id = message.id or str(uuid4())
             if isinstance(message, HumanMessage):
                 message.name = ctx.player.name
-            ctx.conversation.add_message(message.type, message.content, message.name, _id=UUID(message.id))
+            ctx.conversation.add_message(
+                message.type,
+                message.content,
+                message.name,
+                _id=UUID(message.id),
+                embedding=vector_by_id.get(message.id),
+            )
 
         ctx.conversation.message_buffer.extend(state.messages)
         ids = [m.id for m in ctx.conversation.message_buffer]

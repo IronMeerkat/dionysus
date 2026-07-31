@@ -9,7 +9,8 @@ from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import Adjudication, DMPlan, DungeonMasterState
 from agents.skills.registry import skill_registry
 from tools.dice import resolve_check
-from tools.status_effects import render_active_status_effects
+from tools.mechanics import list_mechanics, render_mechanics_full
+from tools.status_effects import render_active_status_effects_by_id
 from utils.llm_models import dm_planner_model
 from utils.prompts import dm_planner_prompt_template
 
@@ -96,8 +97,12 @@ def make_dm_planner(ctx: DMContext):
 
         # Negotiated campaign mechanics are binding procedures for the plan;
         # appended (not templated) so the Langfuse prompt stays stable and
-        # campaigns without mechanics pay no prompt cost.
-        mechanics_block = await asyncio.to_thread(lambda: ctx.mechanics)
+        # campaigns without mechanics pay no prompt cost. The mechanics query
+        # runs on a worker thread but takes the snapshot campaign_id, so no
+        # expired ORM attribute is lazily reloaded off the event loop.
+        mechanics_block = await asyncio.to_thread(
+            lambda: render_mechanics_full(list_mechanics(ctx.campaign_id))
+        )
         if mechanics_block:
             logger.info(
                 f"⚙️ Injecting campaign mechanics ({len(mechanics_block)} chars) into the planner prompt"
@@ -120,9 +125,15 @@ def make_dm_planner(ctx: DMContext):
             # lore, and intent summary the ruling needs. The PC's permanent
             # sheet effects are filtered deterministically by scene presence
             # (negated effects are hidden) and appended to the skill body.
+            # present_names and the player id/name are captured on the event
+            # loop; the effect query/render runs on the worker thread via
+            # the by-id helper so no expired ORM relationship is touched
+            # off-loop.
             present_names = [c.name for c in ctx.conversation.characters]
+            player_id = ctx.player_id
+            player_name = ctx.player.name
             effects_block = await asyncio.to_thread(
-                render_active_status_effects, ctx.player, present_names
+                render_active_status_effects_by_id, player_id, player_name, present_names
             )
             skill_body = skill_registry.get("dm-adjudication").body
             if effects_block:

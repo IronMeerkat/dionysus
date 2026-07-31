@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from logging import getLogger
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
-from database.postgres_connection import Base
+from database.postgres_connection import Base, db_session
+from hephaestus.settings import settings
 
 logger = getLogger(__name__)
 
@@ -37,6 +38,28 @@ class World(Base):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def entry_count(self) -> int:
+        """📚 Entry count via its own task session -- works on detached Worlds."""
+        if self.id is None:
+            return 0
+        with db_session() as s:
+            return s.query(func.count(LoreEntry.id)).filter(LoreEntry.world_id == self.id).scalar() or 0
+
+    @property
+    def simple_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "entry_count": self.entry_count,
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    @classmethod
+    def get_world_by_name(cls, name: str) -> "World":
+        return cls.get(name=name)
+
     def __repr__(self) -> str:
         return f"<World(id={self.id}, name='{self.name}')>"
 
@@ -63,6 +86,43 @@ class LoreEntry(Base):
     )
 
     world = relationship("World", back_populates="entries")
+
+    @property
+    def simple_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "content": self.content,
+            "world_name": self.world.name,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    @classmethod
+    def preview_entries(cls, world: "World") -> list[dict[str, object]]:
+        preview_chars = settings.memory.recall.lore_preview_chars
+        with db_session() as s:
+            entries = s.query(cls).filter(cls.world_id == world.id).order_by(cls.created_at).all()
+            return [
+                {
+                    "id": e.id,
+                    "title": e.title,
+                    "preview": " ".join(e.content.split())[: preview_chars],
+                    "created_at": e.created_at.isoformat(),
+                    "updated_at": e.updated_at.isoformat(),
+                }
+                for e in entries
+            ]
+
+    @classmethod
+    def filter_by_world(cls, world: "World") -> list["LoreEntry"]:
+        with db_session() as s:
+            return s.query(cls).filter(cls.world_id == world.id).order_by(cls.created_at).all()
+
+    @classmethod
+    def get_entry(cls, entry_id: int) -> "LoreEntry":
+        with db_session() as s:
+            return s.query(cls).filter(cls.id == entry_id).first()
 
     def __repr__(self) -> str:
         return f"<LoreEntry(id={self.id}, world_id={self.world_id}, title='{self.title}')>"
