@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemM
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.dialects.postgresql import UUID, insert as pg_insert
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import reconstructor, relationship
 
 from database.postgres_connection import Base, Session, db_session
@@ -200,32 +200,39 @@ class Conversation(Base):
         """
         _id = _id or uuid.uuid4()
         msg = Message(id=_id, conversation_id=self.id, role=role, content=content, speaker_name=speaker_name, embedding=embedding)
-        # In-memory append keeps the live session's snapshot in sync with the
-        # DB; the write below uses its own short-lived session (hand-rolled
-        # rather than db_session() because a duplicate UUID is an expected,
-        # quietly-skippable outcome, not a 💥 worth logging a trace for).
-        self.messages.append(msg)
-        # The relationship append back-referenced the (detached) conversation;
-        # drop it so the writer session inserts the row by FK alone instead of
-        # cascading the whole detached snapshot graph into itself.
-        msg.conversation = self
         s = Session()
         try:
-            s.add(msg)
+            # Core-level insert, not s.add(msg): this conversation is a
+            # detached live snapshot, and an ORM add would cascade-merge the
+            # whole snapshot graph into the writer session — re-inserting
+            # conversation_characters rows that add_character already upserted
+            # (💥 UniqueViolation). A duplicate UUID is an expected,
+            # quietly-skippable outcome, so it is handled via
+            # on_conflict_do_nothing + rowcount rather than an exception.
+            result = s.execute(
+                pg_insert(Message.__table__)
+                .values(
+                    id=_id,
+                    conversation_id=self.id,
+                    role=role,
+                    content=content,
+                    speaker_name=speaker_name,
+                    embedding=embedding,
+                )
+                .on_conflict_do_nothing()
+            )
             s.commit()
+            if result.rowcount == 0:
+                logger.warning(f"⚠️ Duplicate message UUID, skipping add (id={msg.id})")
+                return None
+            # In-memory append keeps the live snapshot in sync with the DB.
+            # Done only after a successful commit so no cleanup is needed.
+            self.messages.append(msg)
             logger.info(
                 f"💬 [{role}] message added to conversation {self.id} "
                 f"(speaker={speaker_name})"
             )
             return msg
-        except IntegrityError as exc:
-            s.rollback()
-            if "duplicate key" in str(exc).lower() or "unique constraint" in str(exc).lower():
-                self.messages.remove(msg)
-                logger.warning(f"⚠️ Duplicate message UUID, skipping add (id={msg.id})")
-                return None
-            logger.exception(f"💥 Failed to persist message in conversation {self.id}")
-            raise
         except SQLAlchemyError:
             s.rollback()
             logger.exception(f"💥 Failed to persist message in conversation {self.id}")
