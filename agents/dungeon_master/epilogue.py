@@ -65,8 +65,8 @@ def make_turn_epilogue(ctx: DMContext):
         )
         report = await run_classifier(
             "dm-scene-change",
-            SceneChangeReport,
             scene_change,
+            SceneChangeReport,
             {
                 "location": ctx.location,
                 "world_clock": ctx.world_clock,

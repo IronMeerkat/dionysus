@@ -2,7 +2,7 @@
 
 Turn pipeline:
 
-    START -> state_loader -> intent_router (+ deterministic lore reads)
+    START -> state_loader -> intent_router (+ vector lore recall)
         -> ooc_responder -> persist_messages            (OOC short-circuit)
         -> dm_planner (adjudication folded in) -> continuity_checker
             -> dm_planner                               (one repair pass)

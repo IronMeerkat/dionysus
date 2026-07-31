@@ -15,7 +15,10 @@ from pydantic import BaseModel
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import ContinuityVerdict, DungeonMasterState, IntentReading
 from agents.skills.registry import skill_registry
+from database.models import World
 from database.models.lore import LoreEntry
+from database.session_utils import embedder
+from hephaestus.settings import settings
 from utils.llm_models import dm_continuity_model, dm_intent_model
 
 logger = getLogger(__name__)
@@ -27,6 +30,8 @@ MAX_PLAN_ATTEMPTS = 2
 # How much recent conversation the cheap classifier hops get to see.
 ROUTER_CONTEXT_WINDOW = 12
 CONTINUITY_CONTEXT_WINDOW = 12
+# How many lore documents vector recall pulls per turn.
+LORE_TOP_K = settings.memory.recall.lore_top_k
 
 
 async def run_classifier(skill: str, model: BaseChatModel, schema: type[T], variables: dict[str, Any], *, label: str) -> T | None:
@@ -49,32 +54,47 @@ async def run_classifier(skill: str, model: BaseChatModel, schema: type[T], vari
     return result
 
 
-async def _read_selected_lore(entry_ids: list[int]) -> str:
-    """📚 Fetch the full markdown of the intent router's selected lore entries.
+async def _retrieve_lore(ctx: DMContext, state: DungeonMasterState, summary: str) -> str:
+    """🔍 Vector lore recall: embed the player's message (anchored by the
+    intent summary) and pull the world's closest entries -- no title catalog,
+    no classifier picking ids.
 
-    Deterministic: the classifier picks ids from the catalog, code does the
-    reads -- no tool loop. Unknown ids are logged and skipped (never invented).
+    Fail-secure: an embedding or search failure is logged and degrades the
+    turn to "(lore retrieval failed this turn)" -- never a fabricated document.
     """
-    if not entry_ids:
+    latest = next((m for m in reversed(state.messages) if m.type == "human"), None)
+    if latest is None:
+        logger.warning("⚠️ [intent_router] no player message to retrieve lore for")
         return "(no lore retrieved this turn)"
-    entries = await asyncio.gather(
-        *(asyncio.to_thread(LoreEntry.get_entry, entry_id) 
-        for entry_id in dict.fromkeys(entry_ids))
-    )
-    docs: list[str] = []
-    for entry_id, entry in zip(dict.fromkeys(entry_ids), entries):
-        if entry is None:
-            logger.warning(f"⚠️ [intent_router] lore entry id={entry_id} not found, skipping")
-            continue
-        docs.append(f"# {entry.title}\n\n{entry.content}")
-    lore = "\n\n---\n\n".join(docs) if docs else "(no lore retrieved this turn)"
-    logger.info(f"📚 [intent_router] fetched {len(docs)} lore document(s)")
-    return lore
+
+    world_name = ctx.campaign.lore_world
+    try:
+        vector = await embedder.aembed_query(f"{summary}\n{latest.content}")
+    except Exception:
+        logger.exception("💥 [intent_router] lore query embedding failed")
+        return "(lore retrieval failed this turn)"
+
+    world = await asyncio.to_thread(World.get_world_by_name, world_name)
+    if world is None:
+        logger.warning(f"⚠️ [intent_router] world '{world_name}' not found for lore recall")
+        return "(world has no entries yet)"
+
+    try:
+        entries = await asyncio.to_thread(LoreEntry.search, world, vector, LORE_TOP_K)
+    except Exception:
+        logger.exception(f"💥 [intent_router] lore vector search failed for world '{world_name}'")
+        return "(lore retrieval failed this turn)"
+
+    if not entries:
+        return "(no lore retrieved this turn)"
+    titles = ", ".join(f"'{e.title}'" for e in entries)
+    logger.info(f"🔍 [intent_router] vector recall hit {len(entries)} lore document(s): {titles}")
+    return "\n\n---\n\n".join(f"# {e.title}\n\n{e.content}" for e in entries)
 
 
 def make_intent_router(ctx: DMContext):
     async def intent_router(state: DungeonMasterState) -> dict:
-        """🧭 Classify the player's latest message and select the lore to read."""
+        """🧭 Classify the player's latest message, then retrieve lore by vector recall."""
         reading = await run_classifier(
             "dm-intent-routing",
             dm_intent_model,
@@ -85,7 +105,6 @@ def make_intent_router(ctx: DMContext):
                 "world_clock": ctx.world_clock,
                 "active_npcs": ctx.npc_names,
                 "player_state": state.player_state,
-                "lore_catalog": state.lore_catalog,
                 "messages": ctx.combined_messages(state, limit=ROUTER_CONTEXT_WINDOW),
             },
             label="intent_router",
@@ -101,7 +120,7 @@ def make_intent_router(ctx: DMContext):
             f"🧭 Intent: {reading.intent_type} / {reading.scene_mode} "
             f"(adjudicate={reading.needs_adjudication}) -- {reading.summary[:120]}"
         )
-        lore = await _read_selected_lore(reading.lore_entry_ids)
+        lore = await _retrieve_lore(ctx, state, reading.summary)
         return {"messages": [], "intent": reading, "lore": lore}
 
     return intent_router

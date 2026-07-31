@@ -2,7 +2,7 @@
 
 Adds an nullable pgvector ``embedding`` column to ``messages`` so every
 message sent in play can be embedded at persist time and recalled via
-cosine-distance search by the merged campaign-admin agent's
+euclidean-distance search by the merged campaign-admin agent's
 ``search_campaign_messages`` tool. An ivfflat index over
 ``(conversation_id, embedding)`` accelerates the per-campaign scan path.
 
@@ -35,10 +35,11 @@ def upgrade() -> None:
     # on the embedding column alone; the existing btree index on
     # conversation_id (from the model) lets the search path filter by
     # campaign cheaply enough. 100 lists is a sane default for a messages
-    # table that grows with play.
+    # table that grows with play. l2 ops match the euclidean_distance
+    # recall metric shared with lore and character memories.
     op.execute(
         "CREATE INDEX ix_messages_embedding "
-        "ON messages USING ivfflat (embedding vector_cosine_ops) "
+        "ON messages USING ivfflat (embedding vector_l2_ops) "
         "WITH (lists = 100)"
     )
 

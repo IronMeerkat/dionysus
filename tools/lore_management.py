@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database.models import LoreEntry, World
 from database.postgres_connection import db_session
+from database.session_utils import embedder
 from hephaestus.settings import settings
 
 logger = getLogger(__name__)
@@ -23,6 +24,17 @@ logger = getLogger(__name__)
 # Preview length for list_lore_entries, kept in sync with the recall config
 # that the knowledge service used to source.
 _PREVIEW_CHARS = settings.memory.recall.lore_preview_chars
+
+
+async def _embed_entries(texts: list[str]) -> list[list[float] | None]:
+    """🧬 Embed lore payloads best-effort: a failed embed never blocks the
+    write -- the row saves with a NULL vector and the backfill script
+    (``scripts/vectorize_lore_entries.py``) picks it up later."""
+    try:
+        return await embedder.aembed_documents(texts)
+    except Exception:
+        logger.exception(f"💥 Lore embedding failed for {len(texts)} entr(ies); saving unvectorized")
+        return [None] * len(texts)
 
 
 class LoreEntryInput(BaseModel):
@@ -143,6 +155,10 @@ async def save_lore_entries(entries: list[LoreEntryInput], world_name: str) -> s
     if not valid:
         return "❌ No entries to save: all content was empty."
 
+    vectors = await _embed_entries(
+        [LoreEntry.embedding_text(e.title, e.content) for e in valid]
+    )
+
     def _bulk_save() -> tuple[int | None, list[dict[str, object]]]:
         # Single timestamp for the whole batch -- avoids N Python-side
         # default evaluations and keeps created/updated consistent.
@@ -156,10 +172,11 @@ async def save_lore_entries(entries: list[LoreEntryInput], world_name: str) -> s
                     "world_id": world.id,
                     "title": e.title.strip(),
                     "content": e.content.strip(),
+                    "embedding": vector,
                     "created_at": now,
                     "updated_at": now,
                 }
-                for e in valid
+                for e, vector in zip(valid, vectors)
             ]
             # Core insert with returning: SQLAlchemy 2.0 batches this into one
             # executemany + RETURNING round-trip (insertmanyvalues), returning
@@ -223,6 +240,21 @@ async def update_lore_entry(
             if not content:
                 return "❌ Failed to update lore entry: content is empty."
 
+        def _current() -> tuple[str, str] | None:
+            """Existing (title, content) so the re-embed covers the merged result."""
+            with db_session() as s:
+                row = s.execute(
+                    select(LoreEntry.title, LoreEntry.content).where(LoreEntry.id == entry_id)
+                ).first()
+                return (row.title, row.content) if row is not None else None
+
+        current = await asyncio.to_thread(_current)
+        if current is None:
+            return f"❌ No lore entry with id={entry_id}."
+        new_title = title.strip() if title is not None else current[0]
+        new_content = content if content is not None else current[1]
+        (vector,) = await _embed_entries([LoreEntry.embedding_text(new_title, new_content)])
+
         def _update() -> str:
             with db_session() as s:
                 world = s.query(World).filter(World.name == world_name.strip()).first()
@@ -240,6 +272,7 @@ async def update_lore_entry(
                     entry.title = title.strip()
                 if content is not None:
                     entry.content = content
+                entry.embedding = vector
                 s.flush()
                 logger.info(f"✏️ Updated lore entry '{entry.title}' (id={entry_id})")
                 return f"✅ Updated '{entry.title}' (id={entry_id}) in world '{world_name}'."

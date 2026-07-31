@@ -31,6 +31,7 @@ Phase 1: Discuss
 Phase 2: Draft markdown documents
 - Write the lore as complete, well-structured markdown documents: headings, paragraphs, lists, whatever serves the material.
   One document per coherent subject (a city, an order, an era) -- do not shred articles into tiny fragments, and do not dump unrelated subjects into one file.
+- Entries are embedded for semantic vector recall during play: the DM retrieves them by meaning, not by browsing titles. Keep each document self-contained and front-load its subject's name and key terms in the title and opening lines so recall can find it.
 - Name all entities explicitly (characters, places, factions, items, events) using their established names where they exist, and link documents by mentioning each other's subjects.
 - Present the documents to the user for review. Iterate until they approve. Do NOT call any save tools during this phase.
 

@@ -7,9 +7,8 @@ import socketio
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agents.dungeon_master.schemas import DungeonMasterState
-from database.models import Campaign, DMSecret, PlayerPreference, World, WorldEvent
+from database.models import Campaign, DMSecret, PlayerPreference, WorldEvent
 from database.models.conversation import Conversation
-from database.models.lore import LoreEntry
 from tools.mechanics import list_mechanics, render_mechanics_full
 from tools.participants import render_participant_state, render_participant_states
 from tools.status_effects import character_sheet_by_id
@@ -121,9 +120,8 @@ def make_state_loader(ctx: DMContext):
         clocks, participant mechanical state, and the recent world events,
         DM secrets, and player preference streams.
 
-        Cheap, so it runs first -- the intent router only needs player_state,
-        which lets the slower lore-retriever tool loop overlap with intent
-        classification.
+        Cheap, so it runs first -- lore itself is no longer catalogued here;
+        the intent router retrieves it by vector recall downstream.
         """
         def _participant_states() -> tuple[str, str]:
             npcs = [c for c in ctx.conversation.characters if c.id != ctx.player_id]
@@ -132,26 +130,14 @@ def make_state_loader(ctx: DMContext):
                 render_participant_states(ctx.campaign_id, npcs),
             )
 
-        def _lore_catalog() -> str:
-            world_name = ctx.campaign.lore_world
-            world = World.get_world_by_name(world_name)
-            if world is None:
-                logger.warning(f"⚠️ World '{world_name}' not found for lore catalog")
-                return "(world has no entries yet)"
-            entries = LoreEntry.preview_entries(world)
-            if not entries:
-                return "(world has no entries yet)"
-            return "\n".join(f"- id={e['id']} | title='{e['title']}'" for e in entries)
-
         (threads_rows, clocks_rows, (player_state, npc_states),
-         events, secrets, prefs, lore_catalog) = await asyncio.gather(
+         events, secrets, prefs) = await asyncio.gather(
             asyncio.to_thread(list_open_threads, ctx.campaign_id),
             asyncio.to_thread(list_faction_clocks, ctx.campaign_id),
             asyncio.to_thread(_participant_states),
             asyncio.to_thread(WorldEvent.recent, ctx.campaign_id),
             asyncio.to_thread(DMSecret.recent, ctx.campaign_id),
             asyncio.to_thread(PlayerPreference.recent, ctx.campaign_id),
-            asyncio.to_thread(_lore_catalog),
         )
         threads = render_threads(threads_rows)
         clocks = render_clocks(clocks_rows)
@@ -162,8 +148,7 @@ def make_state_loader(ctx: DMContext):
             f"{len(events.splitlines())} events, {len(secrets.splitlines())} secrets, "
             f"{len(prefs.splitlines())} prefs, "
             f"{len(player_state.splitlines())} player-state, "
-            f"{len(npc_states.splitlines())} npc-state lines, "
-            f"{len(lore_catalog.splitlines())} lore-catalog lines"
+            f"{len(npc_states.splitlines())} npc-state lines"
         )
         return {
             "messages": [],
@@ -174,7 +159,6 @@ def make_state_loader(ctx: DMContext):
             "world_events": events,
             "secret_knowledge": secrets,
             "player_prefs": prefs or "(nothing learned yet)",
-            "lore_catalog": lore_catalog,
         }
 
     return state_loader

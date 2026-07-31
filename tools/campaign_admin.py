@@ -596,7 +596,7 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
                     .join(Conversation, Conversation.id == Message.conversation_id)
                     .filter(Conversation.campaign_id == campaign_id)
                     .filter(Message.embedding.isnot(None))
-                    .order_by(Message.embedding.cosine_distance(vector))
+                    .order_by(Message.embedding.l2_distance(vector))
                     .limit(top_k)
                     .all()
                 )

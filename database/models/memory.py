@@ -87,11 +87,11 @@ class CharacterMemory(Base):
             base = s.query(cls).filter(cls.campaign_id == campaign_id, cls.character_id == character_id)
             similar = (
                 base.filter(cls.embedding.isnot(None))
-                .order_by(cls.embedding.cosine_distance(vector))
+                .order_by(cls.embedding.l2_distance(vector))
                 .limit(recall_cfg.memories_top_k)
                 .all()
             )
-            recent = base.order_by(cls.id.desc()).limit(recall_cfg.memories_recent).all()
+            recent = base.order_by(cls.created_at.desc()).limit(recall_cfg.memories_recent).all()
         seen = {m.id: m.content for m in [*similar, *recent]}
         logger.info(f"🧠 Recalled {len(seen)} memories for character {character_id} (campaign {campaign_id})")
         return "\n".join(content for _, content in sorted(seen.items()))

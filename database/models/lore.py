@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from logging import getLogger
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
@@ -8,6 +9,8 @@ from database.postgres_connection import Base, db_session
 from hephaestus.settings import settings
 
 logger = getLogger(__name__)
+
+EMBED_DIM = settings.memory.embed_dim
 
 
 class World(Base):
@@ -73,6 +76,7 @@ class LoreEntry(Base):
     world_id = Column(Integer, ForeignKey("worlds.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
+    embedding = Column(Vector(EMBED_DIM), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -118,6 +122,30 @@ class LoreEntry(Base):
     def filter_by_world(cls, world: "World") -> list["LoreEntry"]:
         with db_session() as s:
             return s.query(cls).filter(cls.world_id == world.id).order_by(cls.created_at).all()
+
+    @staticmethod
+    def embedding_text(title: str, content: str) -> str:
+        """🧬 The exact payload embedded for an entry -- keep every write
+        path and the backfill script on this one shape so vectors are
+        comparable."""
+        return f"# {title.strip()}\n\n{content.strip()}"
+
+    @classmethod
+    def search(cls, world: "World", vector: list[float], top_k: int) -> list["LoreEntry"]:
+        """🔍 Euclidean-similarity recall over a world's embedded entries.
+
+        Only rows with an embedding participate; unembedded entries are
+        invisible until the backfill script (or a re-save) vectorizes them.
+        """
+        with db_session() as s:
+            return (
+                s.query(cls)
+                .filter(cls.world_id == world.id)
+                .filter(cls.embedding.isnot(None))
+                .order_by(cls.embedding.l2_distance(vector))
+                .limit(top_k)
+                .all()
+            )
 
     @classmethod
     def get_entry(cls, entry_id: int) -> "LoreEntry":

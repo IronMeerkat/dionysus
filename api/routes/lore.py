@@ -5,10 +5,21 @@ from fastapi.exceptions import HTTPException
 
 from database.models.lore import LoreEntry, World
 from database.postgres_connection import db_session
+from database.session_utils import embedder
 
 logger = logging.getLogger(__name__)
 
 lore_router = APIRouter(prefix="/lore")
+
+
+def _embed_entry_text(text: str) -> list[float] | None:
+    """🧬 Best-effort embed: a failed embed never blocks the write -- the row
+    saves with a NULL vector and the backfill script picks it up later."""
+    try:
+        return embedder.embed_query(text)
+    except Exception:
+        logger.exception("💥 Lore embedding failed; saving unvectorized")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +96,12 @@ def api_create_entry(
         world = s.query(World).filter(World.name == world_name.strip()).first()
         if world is None:
             raise HTTPException(status_code=404, detail=f"World '{world_name}' not found")
-        entry = LoreEntry(world_id=world.id, title=title.strip(), content=content.strip())
+        entry = LoreEntry(
+            world_id=world.id,
+            title=title.strip(),
+            content=content.strip(),
+            embedding=_embed_entry_text(LoreEntry.embedding_text(title, content)),
+        )
         s.add(entry)
         s.flush()
         response = entry.simple_dict
@@ -107,6 +123,10 @@ def api_update_entry(
             entry.title = title.strip()
         if content is not None:
             entry.content = content.strip()
+        if title is not None or content is not None:
+            entry.embedding = _embed_entry_text(
+                LoreEntry.embedding_text(entry.title, entry.content)
+            )
         s.flush()
         response = entry.simple_dict
     logger.info(f"📜 Updated entry '{entry.title}' (id={entry.id})")

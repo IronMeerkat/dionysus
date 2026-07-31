@@ -24,11 +24,6 @@ scene_mode -- the dominant frame for this turn: social, exploration, investigati
 
 needs_adjudication -- true ONLY when the player attempts an in-character action whose outcome is genuinely uncertain AND consequential (sneaking past guards, lying to someone suspicious, picking a lock, leaping a chasm, fighting). Plain dialogue, trivial actions (opening an unlocked door), and all questions are false. When in doubt for pure conversation, choose false.
 
-summary -- one short line stating what the player is trying to accomplish this turn.
-
-lore_entry_ids -- ids of entries from the lore library below that are worth reading in full to handle this turn (people, places, factions, items, or events the player's message touches on). Empty for small talk, OOC questions, or when no entry is relevant. Only pick ids that appear in the catalog; never invent ids.
-
-[LORE LIBRARY -- available entries]
-{lore_catalog}
+summary -- one short line stating what the player is trying to accomplish this turn. Write it as a retrieval anchor: name the people, places, factions, and items the message touches on. The DM uses it to pull relevant lore from the world's library by semantic search -- you never see the library yourself.
 
 Classify only the latest player message, using earlier messages as context.

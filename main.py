@@ -1,9 +1,9 @@
 import logging
 
-from hephaestus.logging.init_logging import init_logging
+from hephaestus.logging import init_logger
 
 
-init_logging()
+init_logger()
 
 logger = logging.getLogger(__name__)
 

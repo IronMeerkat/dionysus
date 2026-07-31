@@ -27,9 +27,6 @@ class IntentReading(BaseModel):
         "True only for in-character actions whose outcome is genuinely uncertain "
         "AND consequential. False for dialogue, trivial actions, and questions."))
     summary: str = Field(description="One short line stating what the player is trying to accomplish.")
-    lore_entry_ids: list[int] = Field(default_factory=list, description=(
-        "Ids of lore entries from the LORE LIBRARY catalog worth reading in full for this turn. "
-        "Empty for small talk, OOC questions, or when no entry is relevant."))
 
     def render(self) -> str:
         return (
@@ -365,7 +362,6 @@ class DungeonMasterState(BaseModel):
     messages: Annotated[list[AnyMessage], operator.add]
     plan: DMPlan | None = None
     lore: str = ""
-    lore_catalog: str = "(no lore entries in this world)"
     world_events: str = ""
     secret_knowledge: str = ""
     # Supervisor pipeline
