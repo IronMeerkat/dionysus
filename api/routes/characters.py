@@ -6,11 +6,26 @@ from sqlalchemy.orm import Session
 
 from database.models.character import Character, CharacterStatusEffect
 from database.postgres_connection import db_session
+from database.session_utils import embedder
 from tools.dice import ADVANTAGE_STATES
 
 logger = logging.getLogger(__name__)
 
 characters_router = APIRouter(prefix="/characters")
+
+
+def _refresh_character_embedding(character: Character) -> None:
+    """🧬 Best-effort re-embed of name+description for semantic dedup.
+
+    Fail-secure: an embedder hiccup must never fail a character write --
+    log and leave the previous/NULL vector in place.
+    """
+    try:
+        character.embedding = embedder.embed_query(
+            Character.embedding_text(character.name, character.description or "")
+        )
+    except Exception:
+        logger.exception(f"💥 Embedding failed for character '{character.name}'; keeping old vector")
 
 
 def _character_list_item(character: Character) -> dict[str, object]:
@@ -90,6 +105,7 @@ def create_character(
         if description.strip():
             character.add_description(description.strip())
         s.add(character)
+        _refresh_character_embedding(character)
         s.flush()
         response = _character_full(character)
         logger.info(f"🎭 Created character '{name}' (id={character.id})")
@@ -107,6 +123,7 @@ def update_character(
         if dup:
             raise HTTPException(status_code=409, detail=f"Character '{name}' already exists")
         character.name = name
+        _refresh_character_embedding(character)
         s.flush()
         logger.info(f"✏️ Updated character {character_id} name to '{name}'")
         return _character_full(character)
@@ -120,6 +137,7 @@ def add_character_description(
     with db_session() as s:
         character = _get_character(s, character_id)
         character.add_description(body.strip())
+        _refresh_character_embedding(character)
         s.flush()
         logger.info(f"📝 Added description v{character.description_version} to character '{character.name}'")
         return _character_full(character)

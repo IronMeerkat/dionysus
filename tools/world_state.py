@@ -230,3 +230,23 @@ def set_world_clock(campaign_id: int, new_value: str) -> None:
         world_state = _ensure_world_state(s, campaign_id)
         world_state.world_clock = new_value.strip()
     logger.info(f"🕰️ World clock set to '{new_value.strip()}' (campaign {campaign_id})")
+
+
+# ------------------------------------------------------------------
+# Scene embedding (drift gate for the scene-change detector)
+# ------------------------------------------------------------------
+
+def set_scene_embedding(campaign_id: int, vector: list[float]) -> None:
+    """🧭 Store the centroid of the last summarized scene's message embeddings."""
+    with db_session() as s:
+        world_state = _ensure_world_state(s, campaign_id)
+        world_state.scene_embedding = vector
+    logger.info(f"🧭 Scene embedding centroid stored (campaign {campaign_id})")
+
+
+def get_scene_embedding(campaign_id: int) -> list[float] | None:
+    """🧭 The stored scene centroid, or None when never summarized."""
+    world_state = get_world_state(campaign_id)
+    if world_state is None or world_state.scene_embedding is None:
+        return None
+    return list(world_state.scene_embedding)

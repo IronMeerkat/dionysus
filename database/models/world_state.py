@@ -1,12 +1,16 @@
 from datetime import datetime, timezone
 from logging import getLogger
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from database.postgres_connection import Base
+from hephaestus.settings import settings
 
 logger = getLogger(__name__)
+
+EMBED_DIM = settings.memory.embed_dim
 
 
 class WorldState(Base):
@@ -26,6 +30,11 @@ class WorldState(Base):
     campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=False, unique=True, index=True)
     location = Column(String, nullable=False, default="")
     world_clock = Column(String, nullable=False, default="")
+    # Centroid of the last summarized scene's message embeddings; the
+    # epilogue's drift gate compares the current window's centroid against
+    # it to skip scene-change LLM checks when nothing has moved. One row
+    # per campaign, so no index.
+    scene_embedding = Column(Vector(EMBED_DIM), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

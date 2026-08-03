@@ -1,95 +1,123 @@
-"""The DM <-> NPC-builder negotiation loop: draft, argue, approve, register."""
+"""One-shot NPC builds: a single structured call designs the card, code persists it.
+
+Replaces the old DM <-> npc-builder negotiation loop (2-6+ calls per NPC)
+with one ``CharacterCard`` structured-output call plus deterministic
+persistence. The registrar is unchanged: it registers whatever the name
+lookup finds and logs loudly when a failed build left nothing to register.
+"""
+import asyncio
 from logging import getLogger
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from agents.dungeon_master.context import DMContext
-from agents.dungeon_master.schemas import BuildReview, DungeonMasterState
-from agents.skilled_agent import WORLD_SKILLS, spawn_skilled_agent
+from agents.dungeon_master.schemas import CharacterCard, DungeonMasterState
+from agents.skills.registry import skill_registry
 from database.models import CampaignParticipant, Character as CharacterModel
+from database.models.lore import LoreEntry, World
 from database.postgres_connection import db_session
-from utils.llm_models import dm_planner_model
-from utils.prompts import dm_npc_reviewer_prompt_template
+from tools.npc_management import create_character
+from tools.status_effects import set_character_status_effect
+from utils.llm_models import skilled_agent_model
 
 logger = getLogger(__name__)
 
-# Max DM<->builder argument rounds per NPC before the DM forces approval.
-MAX_BUILD_ROUNDS = 3
+
+def register_character_in_scene(ctx: DMContext, character: CharacterModel) -> None:
+    """🎭 Add a character to the conversation and ensure its campaign state row.
+
+    Shared by ``npc_registrar`` (post-build) and the planner's semantic
+    dedup (an introduction that matched an existing character skips the
+    build loop but still joins the scene exactly the same way).
+    """
+    ctx.conversation.add_character(character)
+    ctx.conversation._npcs_introduced = True
+    CampaignParticipant.get_or_create(campaign_id=ctx.campaign_id, character_id=character.id)
+    logger.info(
+        f"🎭 NPC '{character.name}' introduced to scene "
+        f"(campaign {ctx.campaign_id}, state row ensured)"
+    )
 
 
 def make_builder_nodes(ctx: DMContext) -> dict:
-    """Build the three negotiation-loop nodes sharing the same context."""
-    dm_review_llm = dm_planner_model.with_structured_output(BuildReview, strict=True)
+    build_llm = skilled_agent_model.with_structured_output(CharacterCard, strict=True)
+
+    async def _skill_system_prompt() -> str:
+        """The npc-building skill body rendered with the world's lore listing."""
+        world_name = ctx.campaign.lore_world
+        world = await asyncio.to_thread(World.get_world_by_name, world_name)
+        if world is None:
+            logger.warning(f"⚠️ World '{world_name}' not found for NPC building; lore listing empty")
+            lore = "(no lore entries)"
+        else:
+            entries = await asyncio.to_thread(LoreEntry.preview_entries, world)
+            lore = "\n".join(f"- id={e['id']} | title='{e['title']}'" for e in entries) or "(no lore entries)"
+        return skill_registry.get("npc-building").body.format(world_name=world_name, lore=lore)
+
+    def _validate(name: str, card: CharacterCard) -> str | None:
+        """Deterministic card validation; returns the rejection reason or None."""
+        description = (card.description or "").strip()
+        if "[character" not in description.lower():
+            return "the description is not a W++ card (missing the [character ...] block)"
+        if name.lower() not in description.lower():
+            return f"the card never names the character '{name}'"
+        return None
 
     async def npc_builder_caller(state: DungeonMasterState) -> dict:
-        """🏗️ Run the npc_builder graph one conversational turn for the
-        NPC currently at the head of the build queue."""
+        """🏗️ One structured call designs the NPC at the head of the build
+        queue; code persists the card and any sheet effects.
+
+        One corrective retry on validation failure, then the introduction
+        is abandoned loudly -- never a half-built NPC.
+        """
         intro = state.build_queue[0]
-        transcript = list(state.build_transcript)
+        messages = [
+            SystemMessage(content=await _skill_system_prompt()),
+            HumanMessage(content=(
+                f"Design an NPC named exactly '{intro.name}' in one shot -- no questions, no "
+                f"tool calls. Build instructions:\n{intro.build_instructions}\n\n"
+                f"Lore relevant to the current scene:\n{state.lore}"
+            )),
+        ]
+        card: CharacterCard | None = None
+        for attempt in (1, 2):
+            try:
+                candidate: CharacterCard = await build_llm.ainvoke(messages)
+            except Exception:
+                logger.exception(f"💥 NPC build call failed for '{intro.name}' (attempt {attempt}/2)")
+                continue
+            error = _validate(intro.name, candidate)
+            if error is None:
+                card = candidate
+                break
+            logger.warning(f"⚠️ NPC card for '{intro.name}' rejected (attempt {attempt}/2): {error}")
+            messages.append(HumanMessage(content=(
+                f"Your card was rejected: {error}. Resubmit the full corrected card."
+            )))
+        if card is None:
+            logger.error(f"🛑 Building '{intro.name}' failed; skipping persistence (registrar logs the no-show)")
+            return {"messages": []}
 
-        if not transcript:
-            logger.info(f"🏗️ Opening build negotiation for NPC '{intro.name}'")
-            transcript = [HumanMessage(content=(
-                f"Design an NPC named exactly '{intro.name}'. "
-                f"The name passed to create_character MUST be exactly '{intro.name}'.\n\n"
-                f"Build instructions:\n{intro.build_instructions}"
-            ))]
-
-        builder_graph = spawn_skilled_agent(
-            WORLD_SKILLS,
-            active=["npc-building"],
-            world_name=ctx.campaign.lore_world,
-            name="npc_builder",
+        created = await asyncio.to_thread(
+            create_character.invoke, {"name": intro.name, "description": card.description.strip()}
         )
-        try:
-            result = await builder_graph.ainvoke({"messages": transcript})
-            delta = result["messages"][len(transcript):]
-        except Exception:
-            # Every DB tool opens its own task session and rolls itself back,
-            # so a failed builder turn cannot poison downstream nodes.
-            logger.exception(f"💥 NPC builder graph failed for '{intro.name}'")
-            delta = []
-
-        created = any(isinstance(m, ToolMessage) and m.name == "create_character" for m in delta)
-        if created:
-            logger.info(f"✅ Builder persisted '{intro.name}' via create_character")
-
-        return {"messages": [], "build_transcript": transcript + delta, "build_created": created}
-
-    async def npc_build_reviewer(state: DungeonMasterState) -> dict:
-        """⚖️ The DM argues back: answers the builder's questions,
-        critiques the draft card, or approves it for persistence."""
-        intro = state.build_queue[0]
-        rounds = state.build_rounds + 1
-        call_now = (
-            f"Call create_character now with the name exactly '{intro.name}' and the full W++ card."
-        )
-
-        if rounds >= MAX_BUILD_ROUNDS:
-            logger.warning(f"⏰ Build negotiation for '{intro.name}' hit round {rounds}, forcing approval")
-            reply = f"We are out of time -- the players are waiting. The card is approved as-is. {call_now}"
-        else:
-            transcript_text = "\n\n".join(
-                f"{'DM' if isinstance(m, HumanMessage) else 'BUILDER'}: {m.content}"
-                for m in state.build_transcript
-                if isinstance(m, (HumanMessage, AIMessage)) and m.content
-            )
-            prompt = await dm_npc_reviewer_prompt_template.ainvoke({
-                "npc_name": intro.name,
-                "build_instructions": intro.build_instructions,
-                "negotiation_transcript": transcript_text,
-            })
-            review: BuildReview = await dm_review_llm.ainvoke(prompt)
-            logger.info(
-                f"⚖️ DM review round {rounds} for '{intro.name}': "
-                f"approved={review.approved}, feedback={review.feedback[:120]}"
-            )
-            reply = f"{review.feedback}\n\nApproved. {call_now}" if review.approved else review.feedback
-
-        return {
-            "build_transcript": [*state.build_transcript, HumanMessage(content=reply)],
-            "build_rounds": rounds,
-        }
+        if created.startswith("❌"):
+            logger.error(f"🏗️ create_character failed for '{intro.name}': {created}")
+            return {"messages": []}
+        logger.info(f"🏗️ {created}")
+        for effect in card.status_effects:
+            try:
+                await asyncio.to_thread(set_character_status_effect.invoke, {
+                    "character_name": intro.name,
+                    "name": effect.name,
+                    "description": effect.note or "",
+                    "affects": effect.affects or "",
+                    "roll_modifier": effect.roll_modifier,
+                    "advantage": effect.advantage,
+                })
+            except Exception:
+                logger.exception(f"💥 Failed to set status effect '{effect.name}' on '{intro.name}'")
+        return {"messages": []}
 
     async def npc_registrar(state: DungeonMasterState) -> dict:
         """🎭 Register the NPC at the head of the build queue into the scene
@@ -113,33 +141,11 @@ def make_builder_nodes(ctx: DMContext) -> dict:
                 f"campaign {ctx.campaign_id}"
             )
         else:
-            ctx.conversation.add_character(character)
-            ctx.conversation._npcs_introduced = True
-            CampaignParticipant.get_or_create(campaign_id=ctx.campaign_id, character_id=character.id)
-            logger.info(
-                f"🎭 NPC '{intro.name}' introduced to scene "
-                f"(campaign {ctx.campaign_id}, state row ensured)"
-            )
+            register_character_in_scene(ctx, character)
 
-        return {
-            "messages": [],
-            "build_queue": state.build_queue[1:],
-            "build_transcript": [],
-            "build_rounds": 0,
-            "build_created": False,
-        }
+        return {"messages": [], "build_queue": state.build_queue[1:]}
 
     return {
         "npc_builder_caller": npc_builder_caller,
-        "npc_build_reviewer": npc_build_reviewer,
         "npc_registrar": npc_registrar,
     }
-
-
-def after_builder(state: DungeonMasterState) -> str:
-    if state.build_created:
-        return "npc_registrar"
-    if state.build_rounds >= MAX_BUILD_ROUNDS:
-        logger.error("🛑 Builder never persisted the NPC despite forced approval, giving up")
-        return "npc_registrar"
-    return "npc_build_reviewer"

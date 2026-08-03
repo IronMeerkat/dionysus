@@ -18,6 +18,7 @@ async def _stream_npc_to_socket(
     npc_graph: object,
     input_messages: list[AnyMessage],
     lore: str,
+    query_vector: list[float] | None,
     speaker: str,
     sio: socketio.AsyncServer,
     sid: str,
@@ -45,7 +46,7 @@ async def _stream_npc_to_socket(
             await sio.emit("stream_start", {"messageId": message_id, "name": speaker}, to=sid)
 
     stream = npc_graph.astream(
-        {"messages": input_messages, "lore": lore},
+        {"messages": input_messages, "lore": lore, "query_vector": query_vector},
         stream_mode=["messages", "updates"], subgraphs=True,
     )
 
@@ -110,15 +111,20 @@ def make_npc_executor(ctx: DMContext):
                 logger.warning(f"⚠️ NPC '{directive.name}' not found in conversation characters")
                 continue
 
-            npc_graph = spawn_npc_directed(character, ctx.conversation, directive)
+            npc_graph = spawn_npc_directed(character, ctx.conversation, directive, state.query_vector)
             input_messages = [*state.messages, *all_messages]
             try:
                 if ctx.sio is not None and ctx.sid is not None:
                     delta = await _stream_npc_to_socket(
-                        npc_graph, input_messages, state.lore, character.name, ctx.sio, ctx.sid,
+                        npc_graph, input_messages, state.lore, state.query_vector,
+                        character.name, ctx.sio, ctx.sid,
                     )
                 else:
-                    result = await npc_graph.ainvoke({"messages": input_messages, "lore": state.lore})
+                    result = await npc_graph.ainvoke({
+                        "messages": input_messages,
+                        "lore": state.lore,
+                        "query_vector": state.query_vector,
+                    })
                     delta = result.get("messages", [])[len(input_messages):]
                 all_messages.extend(delta)
                 logger.info(f"🎭 {directive.name} produced {len(delta)} message(s)")

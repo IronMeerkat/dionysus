@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from logging import getLogger
 from typing import ClassVar
 
-from langchain_core.messages import AnyMessage
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.exc import SQLAlchemyError
@@ -20,13 +19,11 @@ logger = getLogger(__name__)
 EMBED_DIM = settings.memory.embed_dim
 recall_cfg = settings.memory.recall
 
-NOTHING_MARKER = "NOTHING"
-
 
 class CharacterMemory(Base):
     """🧠 One distilled memory an NPC formed during a campaign.
 
-    Written by the significance filter after a turn; recalled via pgvector
+    Written by the scene epilogue when a scene ends; recalled via pgvector
     similarity (plus recency) when the NPC narrates.
     """
 
@@ -82,6 +79,13 @@ class CharacterMemory(Base):
         return await asyncio.to_thread(cls._recall, campaign_id, character_id, vector)
 
     @classmethod
+    async def recall_by_vector(cls, campaign_id: int, character_id: int, vector: list[float]) -> str:
+        """🔍 Same recall as ``recall`` but with a precomputed query vector --
+        the DM embeds the player's message once per turn and every responding
+        NPC reuses it instead of re-embedding."""
+        return await asyncio.to_thread(cls._recall, campaign_id, character_id, vector)
+
+    @classmethod
     def _recall(cls, campaign_id: int, character_id: int, vector: list[float]) -> str:
         with db_session() as s:
             base = s.query(cls).filter(cls.campaign_id == campaign_id, cls.character_id == character_id)
@@ -96,44 +100,6 @@ class CharacterMemory(Base):
         logger.info(f"🧠 Recalled {len(seen)} memories for character {character_id} (campaign {campaign_id})")
         return "\n".join(content for _, content in sorted(seen.items()))
 
-    @classmethod
-    async def process_and_save(
-        cls,
-        messages: list[AnyMessage],
-        campaign_id: int,
-        character_id: int,
-        character_name: str,
-        character_description: str,
-    ) -> None:
-        """🧠 Let the significance filter distill the turn; if anything was
-        worth remembering, embed and persist it as one row. Skips silently
-        when the filter answers NOTHING."""
-        from utils.llm_models import memory_filter
-        from utils.prompts import memory_significance_prompt
-
-        lines = [f"{m.name}: {m.content}" for m in messages]
-        if not lines:
-            logger.warning("⚠️ No messages to evaluate for memory, skipping")
-            return
-
-        prompt = await memory_significance_prompt.ainvoke({
-            "name": character_name,
-            "description": character_description,
-            "conversation": "\n".join(lines),
-        })
-        extracted: str = (await memory_filter.ainvoke(prompt)).content.strip()
-
-        if not extracted or extracted.upper().startswith(NOTHING_MARKER):
-            logger.info(f"🧹 {character_name}: nothing meaningful to remember, skipping save")
-            return
-
-        logger.info(f"🧠 {character_name}: meaningful memory extracted, saving")
-        memory = await asyncio.to_thread(
-            cls.add_memory, campaign_id, character_id, extracted.splitlines()[0][:120], extracted
-        )
-        if memory is not None:
-            logger.info(f"💾 Memory '{memory.title}' saved (id={memory.id}, campaign {campaign_id})")
-
     def __repr__(self) -> str:
         return (
             f"<CharacterMemory(id={self.id}, campaign_id={self.campaign_id}, "
@@ -144,8 +110,11 @@ class CharacterMemory(Base):
 class CampaignStream(Base):
     """🌊 Append-only campaign knowledge stream: one ``content`` row per fact.
 
-    Subclasses differ only in table name and how many recent rows the DM
-    context gets by default (``recent_limit``).
+    Subclasses differ only in table name and how many rows the DM context
+    gets by default (``relevant_top_k`` vector hits plus ``recent_limit``
+    recency rows). Every row is embedded at write time (best-effort) so
+    ``relevant_and_recent`` can surface topically related facts instead of
+    only the freshest ones.
     """
 
     __abstract__ = True
@@ -153,6 +122,7 @@ class CampaignStream(Base):
     id = Column(Integer, primary_key=True)
     campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=False, index=True)
     content = Column(Text, nullable=False)
+    embedding = Column(Vector(EMBED_DIM), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -160,18 +130,35 @@ class CampaignStream(Base):
     )
 
     recent_limit: ClassVar[int] = 5
+    relevant_top_k: ClassVar[int] = 8
 
     @classmethod
     async def add_items(cls, campaign_id: int, items: list[str]) -> None:
-        """💾 Append one row per non-empty item."""
+        """💾 Append one row per non-empty item, embedding each for recall.
+
+        Fail-secure: an embedder failure stores the rows with NULL embeddings
+        (recall simply skips them until a backfill) -- a fact must never be
+        dropped because the embedder hiccuped.
+        """
         items = [i.strip() for i in items if i and i.strip()]
         if not items:
             return
 
+        try:
+            vectors: list[list[float] | None] = await embedder.aembed_documents(items)
+        except Exception:
+            logger.exception(
+                f"💥 Embedding failed for {len(items)} {cls.__name__} item(s); storing without vectors"
+            )
+            vectors = [None] * len(items)
+
         def _insert() -> bool:
             try:
                 with db_session() as s:
-                    s.add_all([cls(campaign_id=campaign_id, content=item) for item in items])
+                    s.add_all([
+                        cls(campaign_id=campaign_id, content=item, embedding=vector)
+                        for item, vector in zip(items, vectors)
+                    ])
                 return True
             except SQLAlchemyError:
                 logger.error(f"❌ Failed to save {len(items)} {cls.__name__} row(s) for campaign {campaign_id}")
@@ -193,6 +180,46 @@ class CampaignStream(Base):
             )
         return "\n".join(r.content for r in reversed(rows))
 
+    @classmethod
+    def relevant(cls, campaign_id: int, vector: list[float], top_k: int | None = None) -> list["CampaignStream"]:
+        """🔍 pgvector top-K rows closest to *vector* (rows with embeddings only)."""
+        with db_session() as s:
+            return (
+                s.query(cls)
+                .filter(cls.campaign_id == campaign_id)
+                .filter(cls.embedding.isnot(None))
+                .order_by(cls.embedding.l2_distance(vector))
+                .limit(top_k or cls.relevant_top_k)
+                .all()
+            )
+
+    @classmethod
+    def relevant_and_recent(
+        cls,
+        campaign_id: int,
+        vector: list[float],
+        top_k: int | None = None,
+        recent: int | None = None,
+    ) -> str:
+        """🔍 Vector top-K unioned with the freshest rows, deduplicated and
+        rendered newline-joined oldest-first -- brand-new facts always
+        surface even when they are not (yet) topically close to the query."""
+        similar = cls.relevant(campaign_id, vector, top_k)
+        with db_session() as s:
+            recent_rows = (
+                s.query(cls)
+                .filter(cls.campaign_id == campaign_id)
+                .order_by(cls.id.desc())
+                .limit(recent if recent is not None else cls.recent_limit)
+                .all()
+            )
+        seen = {row.id: row.content for row in [*similar, *recent_rows]}
+        logger.info(
+            f"🔍 Recalled {len(seen)} {cls.__name__} row(s) for campaign {campaign_id} "
+            f"({len(similar)} relevant + {len(recent_rows)} recent)"
+        )
+        return "\n".join(content for _, content in sorted(seen.items()))
+
     def __repr__(self) -> str:
         return f"<{type(self).__name__}(id={self.id}, campaign_id={self.campaign_id})>"
 
@@ -203,6 +230,7 @@ class WorldEvent(CampaignStream):
     __tablename__ = "world_events"
 
     recent_limit: ClassVar[int] = recall_cfg.events_recent
+    relevant_top_k: ClassVar[int] = recall_cfg.events_top_k
 
 
 class DMSecret(CampaignStream):
@@ -211,6 +239,7 @@ class DMSecret(CampaignStream):
     __tablename__ = "dm_secrets"
 
     recent_limit: ClassVar[int] = recall_cfg.secrets_recent
+    relevant_top_k: ClassVar[int] = recall_cfg.secrets_top_k
 
 
 class PlayerPreference(CampaignStream):

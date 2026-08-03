@@ -55,9 +55,6 @@ skilled_agent_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai, extra_body={"reaso
 #     max_retries=4,
 # )
 
-memory_filter = ChatNanoGPT(**glm) #ChatXAI(**xai)
-
-
 dm_planner_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"}, max_tokens=2400)
 
 # dm_narrator_model = ChatXAI(**models.xai)
@@ -66,9 +63,7 @@ dm_narrator_model = ChatNanoGPT(**glm)
 
 # --- DM supervisor subagents ------------------------------------------------
 # Fast non-reasoning model for cheap classification/validation hops.
-dm_intent_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai_small)
 dm_continuity_model = ChatNanoGPT(**moonshot) #ChatXAI(**xai_small)
 
 dm_ooc_model = ChatNanoGPT(**glm) #ChatXAI(**xai)
-dm_summarizer_model = ChatNanoGPT(**glm) #ChatXAI(**xai)
 dm_faction_model = ChatNanoGPT(**glm) #ChatXAI(**xai, extra_body={"reasoning_effort": "high"})

@@ -1,7 +1,7 @@
 """add lore entry embedding column for vector lore recall
 
 Adds a nullable pgvector ``embedding`` column to ``lore_entries`` so the
-DM's intent router can retrieve relevant lore via cosine-distance search
+DM's intent router can retrieve relevant lore via l2-distance search
 over the player's message, instead of reading a catalog of every title
 and picking ids. An ivfflat index accelerates the per-world scan path.
 

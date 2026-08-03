@@ -17,7 +17,6 @@ from tools.participants import render_participant_state
 from tools.status_effects import character_sheet_by_id
 from utils.llm_models import npc_narration
 from utils.prompts import narrator_prompt_template
-from utils.tasks import fire_and_forget
 
 if TYPE_CHECKING:
     from agents.dungeon_master import NPCDirective
@@ -69,10 +68,14 @@ async def narrate_with_retry(
     nudge inserted right before the prefill.
     """
     other_speakers = [*(other_speakers or []), "Narrator"]
+    # Server-side stop sequences end generation the moment the model starts
+    # another participant's turn, so ventriloquized replies never get
+    # (expensively) completed. The retry loop below stays as a safety net.
+    stop = [f"\n{name}:" for name in other_speakers]
     messages = list(prompt.messages)
     response = None
     for attempt in range(1, max_attempts + 1):
-        response = await npc_narration.ainvoke(messages)
+        response = await npc_narration.ainvoke(messages, stop=stop)
         content = strip_speaker_prefix(response.content, name)
         content, truncated = truncate_foreign_turns(content, other_speakers)
         if truncated:
@@ -105,12 +108,16 @@ def spawn_npc_directed(
     character: CharacterModel,
     conversation: Conversation,
     directive: "NPCDirective",
+    query_vector: list[float] | None = None,
 ) -> StateGraph:
     """Build an NPC graph that honors a DM directive.
 
     The ``directive`` provides ``.guidance`` (what to focus on) and
     ``.withheld_info`` (facts to avoid revealing). The DM planner has
     already decided this NPC responds this turn, so there is no veto.
+
+    ``query_vector`` is the turn's precomputed player-message embedding;
+    when present the memory recall reuses it instead of re-embedding.
     """
 
     # Sheets/location/background are fetched fresh per spawn (the conversation
@@ -134,6 +141,9 @@ def spawn_npc_directed(
         memories: str = Field(default="")
         self_state: str = Field(default="", description="This NPC's live mechanical state, rendered prompt-ready.")
         player_state: str = Field(default="", description="The player character's live mechanical state, rendered prompt-ready.")
+        # Turn-level player-message embedding from the DM state_loader;
+        # reused for memory recall so each NPC skips its own embedder call.
+        query_vector: list[float] | None = Field(default=None, exclude=True)
 
         @property
         def combined_messages(self) -> list[AnyMessage]:
@@ -152,23 +162,31 @@ def spawn_npc_directed(
                 "story_background": (campaign.story_background if campaign else "") or "",
                 "messages": self.combined_messages,
                 "dm_guidance": directive.guidance,
-                **self.model_dump(exclude={"messages"}),
+                **self.model_dump(exclude={"messages", "query_vector"}),
             }
 
     async def context_loader(state: NPCState) -> dict:
         """🧠 Load this NPC's memories (pgvector recall) and live participant
-        states. Lore arrives in the initial state from the DM's retriever."""
-        last_human = next((m for m in reversed(state.messages) if isinstance(m, HumanMessage)), None)
-        query = last_human.content if last_human else character.name
-
+        states. Lore and the turn's query vector arrive in the initial state
+        from the DM; the vector is reused for recall when present."""
         def _participant_states() -> tuple[str, str]:
             return (
                 render_participant_state(conversation.campaign_id, character.id, character.name),
                 render_participant_state(conversation.campaign_id, conversation.player.id),
             )
 
+        if state.query_vector is not None:
+            memories_coro = CharacterMemory.recall_by_vector(
+                conversation.campaign_id, character.id, state.query_vector
+            )
+        else:
+            logger.warning(f"⚠️ {character.name}: no turn query vector, embedding for memory recall directly")
+            last_human = next((m for m in reversed(state.messages) if isinstance(m, HumanMessage)), None)
+            query = last_human.content if last_human else character.name
+            memories_coro = CharacterMemory.recall(conversation.campaign_id, character.id, query)
+
         memories, (self_state, player_state) = await asyncio.gather(
-            CharacterMemory.recall(conversation.campaign_id, character.id, query),
+            memories_coro,
             asyncio.to_thread(_participant_states),
         )
         return {
@@ -191,13 +209,8 @@ def spawn_npc_directed(
         response.content = prefix + content
         response.name = character.name
         response.id = str(uuid4())
-        fire_and_forget(CharacterMemory.process_and_save(
-            messages=state.combined_messages,
-            campaign_id=conversation.campaign_id,
-            character_id=character.id,
-            character_name=character.name,
-            character_description=character_sheet_by_id(character.id),
-        ))
+        # No per-turn memory extraction: lasting memories are distilled once
+        # per scene by the merged scene epilogue (character_memories field).
         return {"messages": [response]}
 
     graph = StateGraph(NPCState)

@@ -5,9 +5,13 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, SystemMessage
 
+from agents.dungeon_master.builder import register_character_in_scene
 from agents.dungeon_master.context import DMContext
-from agents.dungeon_master.schemas import Adjudication, DMPlan, DungeonMasterState
+from agents.dungeon_master.schemas import Adjudication, DMPlan, DungeonMasterState, NPCIntroduction
 from agents.skills.registry import skill_registry
+from database.models import Character as CharacterModel
+from database.session_utils import embedder
+from hephaestus.settings import settings
 from tools.dice import resolve_check
 from tools.mechanics import list_mechanics, render_mechanics_full
 from tools.status_effects import render_active_status_effects_by_id
@@ -57,18 +61,83 @@ def _resolve_adjudication(plan: DMPlan) -> Adjudication | None:
     return adjudication
 
 
+async def _match_existing_character(
+    ctx: DMContext, intro: NPCIntroduction, tau: float
+) -> tuple[CharacterModel, float] | None:
+    """🔎 The closest existing character to a planned introduction, or None.
+
+    Fail-secure: any embedding/search failure logs and returns None so the
+    intro proceeds through the normal build loop -- an introduction is never
+    silently skipped because the embedder or the search hiccuped.
+    """
+    try:
+        vector = await embedder.aembed_query(
+            CharacterModel.embedding_text(intro.name, intro.build_instructions)
+        )
+        exclude = (ctx.player_id,) if ctx.player_id is not None else ()
+        neighbors = await asyncio.to_thread(CharacterModel.nearest_by_vector, vector, 1, exclude)
+    except Exception:
+        logger.exception(f"💥 Dedup search failed for intro '{intro.name}'; proceeding with the normal build")
+        return None
+    if not neighbors:
+        return None
+    character, distance = neighbors[0]
+    if distance > tau:
+        logger.info(
+            f"🔎 Intro '{intro.name}' nearest existing character is '{character.name}' "
+            f"at L2={distance:.3f} > tau={tau}; building fresh"
+        )
+        return None
+    return character, distance
+
+
+async def _dedup_npc_intros(ctx: DMContext, plan: DMPlan) -> list[NPCIntroduction]:
+    """♻️ Semantic dedup of planned NPC introductions against existing characters.
+
+    A match under ``tau_dedup`` means the planner reinvented someone who
+    already exists under a variant name/description: the intro leaves the
+    build queue, its name (and any directive using it) is rewritten to the
+    matched character's exact name so registration and the responding-NPC
+    directives line up, and the character joins the scene through the same
+    path the registrar uses.
+    """
+    tau = settings.memory.dedup.tau_dedup
+    queue: list[NPCIntroduction] = []
+    for intro in plan.npcs_to_introduce:
+        match = await _match_existing_character(ctx, intro, tau)
+        if match is None:
+            queue.append(intro)
+            continue
+        character, distance = match
+        old_name = intro.name
+        if character.name != old_name:
+            intro.name = character.name
+            for directive in plan.responding_npcs:
+                if directive.name == old_name:
+                    directive.name = character.name
+        logger.info(
+            f"♻️ Intro '{old_name}' matched existing character '{character.name}' "
+            f"(L2={distance:.3f} <= tau={tau}); skipping the build loop"
+        )
+        register_character_in_scene(ctx, character)
+    return queue
+
+
 def make_dm_planner(ctx: DMContext):
     plan_llm = dm_planner_model.with_structured_output(DMPlan, strict=True)
 
     async def dm_planner(state: DungeonMasterState) -> dict:
-        """🧠 Decide what happens this turn, honoring intent and adjudicating actions."""
-        intent_block = state.intent.render() if state.intent else "(no intent reading)"
-        needs_adjudication = bool(state.intent and state.intent.needs_adjudication)
+        """🧠 Decide what happens this turn, adjudicating actions as needed.
+
+        There is no upstream intent reading: the planner reads the player's
+        message itself and decides whether it needs adjudication, so the
+        adjudication skill's instructions are always appended.
+        """
+        intent_block = f"The player's latest move: {DMContext.last_human_query(state)}"
         adjudication_block = (
-            "(pending -- you rule on the action via the plan's adjudication field; "
+            "(pending -- when the player's move is an in-character action with a genuinely "
+            "uncertain AND consequential outcome, rule on it via the plan's adjudication field; "
             "code rolls the dice and resolves the outcome after your ruling)"
-            if needs_adjudication
-            else "(no adjudication this turn -- plain dialogue or trivial action)"
         )
         continuity_block = state.continuity_notes or "(none -- first attempt)"
         if state.continuity_notes:
@@ -119,37 +188,40 @@ def make_dm_planner(ctx: DMContext):
                 f"{mechanics_block}"
             )))
 
-        if needs_adjudication:
-            # The dm-adjudication skill's instructions apply only this turn;
-            # the planner prompt already carries the contract, player state,
-            # lore, and intent summary the ruling needs. The PC's permanent
-            # sheet effects are filtered deterministically by scene presence
-            # (negated effects are hidden) and appended to the skill body.
-            # present_names and the player id/name are captured on the event
-            # loop; the effect query/render runs on the worker thread via
-            # the by-id helper so no expired ORM relationship is touched
-            # off-loop.
-            present_names = [c.name for c in ctx.conversation.characters]
-            player_id = ctx.player_id
-            player_name = ctx.player.name
-            effects_block = await asyncio.to_thread(
-                render_active_status_effects_by_id, player_id, player_name, present_names
-            )
-            skill_body = skill_registry.get("dm-adjudication").body
-            if effects_block:
-                skill_body += f"\n\n[ACTIVE PERMANENT STATUS EFFECTS]\n{effects_block}"
-            else:
-                logger.info("🧬 No active permanent status effects for the PC this turn")
-            prompt.messages.append(SystemMessage(content=skill_body))
+        # The dm-adjudication skill's instructions apply to every turn -- the
+        # planner itself decides whether the player's move needs a ruling.
+        # The PC's permanent sheet effects are filtered deterministically by
+        # scene presence (negated effects are hidden) and appended to the
+        # skill body. present_names and the player id/name are captured on
+        # the event loop; the effect query/render runs on the worker thread
+        # via the by-id helper so no expired ORM relationship is touched
+        # off-loop.
+        present_names = [c.name for c in ctx.conversation.characters]
+        player_id = ctx.player_id
+        player_name = ctx.player.name
+        effects_block = await asyncio.to_thread(
+            render_active_status_effects_by_id, player_id, player_name, present_names
+        )
+        skill_body = skill_registry.get("dm-adjudication").body
+        if effects_block:
+            skill_body += f"\n\n[ACTIVE PERMANENT STATUS EFFECTS]\n{effects_block}"
+        else:
+            logger.info("🧬 No active permanent status effects for the PC this turn")
+        prompt.messages.append(SystemMessage(content=skill_body))
 
         plan: DMPlan = await plan_llm.ainvoke(prompt)
-        adjudication = _resolve_adjudication(plan) if needs_adjudication else None
-        if not needs_adjudication and plan.adjudication is not None:
-            logger.warning("⚖️ Planner ruled on an action that needed no adjudication; discarding ruling")
-            plan.adjudication = None
+        adjudication = _resolve_adjudication(plan) if plan.adjudication else None
+        if plan.closing_narration and plan.responding_npcs:
+            # One less narrator call: the last responding NPC carries the beat.
+            plan.responding_npcs[-1].guidance += (
+                f"\nEnd your turn by conveying: {plan.closing_narration}"
+            )
+            logger.info("📜 Closing narration folded into the last responding NPC's guidance")
+            plan.closing_narration = None
+        build_queue = await _dedup_npc_intros(ctx, plan) if plan.npcs_to_introduce else []
         logger.info(
             f"📝 Plan: {len(plan.responding_npcs)} NPC(s), "
-            f"{len(plan.npcs_to_introduce)} intro(s), "
+            f"{len(plan.npcs_to_introduce)} intro(s) ({len(build_queue)} to build), "
             f"{len(plan.thread_updates)} thread update(s), "
             f"{len(plan.clock_advances)} clock tick(s), "
             f"offscreen={plan.offscreen_simulation}"
@@ -158,7 +230,7 @@ def make_dm_planner(ctx: DMContext):
             "messages": [],
             "plan": plan,
             "adjudication": adjudication,
-            "build_queue": list(plan.npcs_to_introduce),
+            "build_queue": build_queue,
             "plan_attempts": state.plan_attempts + 1,
         }
 

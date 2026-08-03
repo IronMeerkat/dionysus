@@ -11,9 +11,23 @@ from database.models import (
 from database.models import Character as CharacterModel
 from database.models import World
 from database.postgres_connection import db_session
+from database.session_utils import embedder
 from tools.status_effects import character_sheet
 
 logger = getLogger(__name__)
+
+
+def _embed_character(name: str, description: str) -> list[float] | None:
+    """🧬 Best-effort character embedding for semantic dedup.
+
+    Fail-secure: an embedder hiccup must never block a character write --
+    log and leave the vector NULL (the backfill script catches up later).
+    """
+    try:
+        return embedder.embed_query(CharacterModel.embedding_text(name, description))
+    except Exception:
+        logger.exception(f"💥 Embedding failed for character '{name}'; storing without a vector")
+        return None
 
 
 def _world_participant_campaigns(world_name: str) -> dict[int, list[str]] | None:
@@ -128,6 +142,7 @@ def create_character(name: str, description: str) -> str:
             s.add(character)
             s.flush()  # Get id before adding description
             character.add_description(description)
+            character.embedding = _embed_character(name, description)
     except SQLAlchemyError:
         logger.error(f"❌ Failed to create character '{name}' (rolled back; see logs)")
         return f"❌ Failed to create character '{name}' (rolled back; see logs)."

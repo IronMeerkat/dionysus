@@ -9,6 +9,7 @@ from database.models.lore import LoreEntry, World
 from database.models.mechanics import CampaignMechanic
 from database.models.memory import CharacterMemory, DMSecret, PlayerPreference, WorldEvent
 from database.models.participants import CampaignParticipant
+from database.models.routing import RoutingExemplar
 from database.models.world_state import FactionClock, QuestThread, WorldState
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "Message",
     "PlayerPreference",
     "QuestThread",
+    "RoutingExemplar",
     "World",
     "WorldEvent",
     "WorldState",

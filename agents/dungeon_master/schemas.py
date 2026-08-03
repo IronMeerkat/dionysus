@@ -9,34 +9,6 @@ NARRATOR_NAME = "Narrator"
 
 
 # ------------------------------------------------------------------
-# Intent routing
-# ------------------------------------------------------------------
-
-class IntentReading(BaseModel):
-    """The intent router's classification of the player's latest message."""
-    intent_type: Literal["dialogue", "action", "ooc_question", "rules_question", "meta"] = Field(
-        description=(
-            "dialogue: in-character speech/social play with no uncertain outcome. "
-            "action: the player attempts something in the world. "
-            "ooc_question: out-of-character question to the DM. "
-            "rules_question: question about game mechanics. "
-            "meta: request about the session itself (tone, pacing, recap)."))
-    scene_mode: Literal["social", "exploration", "investigation", "confrontation", "travel", "downtime"] = Field(
-        description="The dominant frame for this turn, used as a pacing hint.")
-    needs_adjudication: bool = Field(description=(
-        "True only for in-character actions whose outcome is genuinely uncertain "
-        "AND consequential. False for dialogue, trivial actions, and questions."))
-    summary: str = Field(description="One short line stating what the player is trying to accomplish.")
-
-    def render(self) -> str:
-        return (
-            f"Intent: {self.intent_type} | Scene mode: {self.scene_mode} | "
-            f"Needs adjudication: {self.needs_adjudication}\n"
-            f"The player wants: {self.summary}"
-        )
-
-
-# ------------------------------------------------------------------
 # Rules adjudication
 # ------------------------------------------------------------------
 
@@ -174,6 +146,33 @@ class SceneChangeReport(BaseModel):
         "One line naming the triggers fired, or why nothing moved."))
 
 
+class CharacterMemoryItem(BaseModel):
+    """One lasting memory a named character formed during the scene."""
+    character_name: str = Field(description="Exact name of the character this memory belongs to.")
+    title: str = Field(description="Short memory title, one line.")
+    content: str = Field(description=(
+        "What the character personally learned, felt, or decided -- from THEIR point of view."))
+
+
+class SceneEpilogue(SceneChangeReport):
+    """One post-turn call: scene-change detection, mechanics reconciliation,
+    and (only when the scene ended) scene memory distillation."""
+    scene_summary: str = Field(default="", description=(
+        "2-4 sentences capturing what happened and why it mattered. "
+        "Empty when changed is false."))
+    canon_updates: list[str] = Field(default_factory=list, description=(
+        "Discrete facts that became true, one per entry, past tense. Empty when changed is false."))
+    npc_updates: list[str] = Field(default_factory=list, description=(
+        "How named NPCs' attitudes, plans, or circumstances changed. Empty when changed is false."))
+    unresolved_hooks: list[str] = Field(default_factory=list, description=(
+        "Questions raised but unanswered, promises unkept, threats looming. Empty when changed is false."))
+    player_preferences: str | None = Field(default=None, description=(
+        "Clear evidence of what the player enjoys or avoids. Null when unsure or changed is false."))
+    character_memories: list[CharacterMemoryItem] = Field(default_factory=list, description=(
+        "Lasting memories individual characters formed this scene. Only what would matter "
+        "to that character later; most scenes yield zero to two. Empty when changed is false."))
+
+
 # ------------------------------------------------------------------
 # NPC orchestration
 # ------------------------------------------------------------------
@@ -237,16 +236,15 @@ class NPCIntroduction(BaseModel):
         "Detailed instructions passed to the NPC builder describing "
         "personality, appearance, role, and backstory."))
     entrance_narration: str = Field(description=(
-        "Brief note on how this NPC enters the scene (expanded by the DM narrator)."))
+        "Player-ready prose describing how this NPC enters the scene (spoken by the Narrator)."))
 
 
-class BuildReview(BaseModel):
-    """The DM's verdict on a character card drafted by the NPC builder."""
-    approved: bool = Field(description=(
-        "True only if a complete, on-brief W++ card with the exact requested name was presented."))
-    feedback: str = Field(description=(
-        "Answers to the builder's questions, or specific critique of the card. "
-        "Confirmation text if approved."))
+class CharacterCard(BaseModel):
+    """A freshly designed NPC, ready to persist: W++ card plus optional sheet effects."""
+    description: str = Field(description="The complete W++ character card and nothing else.")
+    status_effects: list[StatusEffectPatch] = Field(default_factory=list, description=(
+        "Permanent sheet effects with roll mechanics. Only when the concept genuinely "
+        "calls for one (a flaw, a gift, a curse); most NPCs need none."))
 
 
 # ------------------------------------------------------------------
@@ -256,8 +254,9 @@ class BuildReview(BaseModel):
 class DMPlan(BaseModel):
     """The Dungeon Master's structured plan for this turn."""
     opening_narration: str | None = Field(default=None, description=(
-        "OPTIONAL scene-setting or environmental narration BEFORE any NPC speaks. Most turns need "
-        "none -- leave None whenever NPC dialogue alone carries the moment."))
+        "OPTIONAL scene-setting or environmental narration BEFORE any NPC speaks, written as "
+        "PLAYER-READY PROSE in the Narrator's voice (spoken to the player verbatim). Most turns "
+        "need none -- leave None whenever NPC dialogue alone carries the moment."))
     responding_npcs: list[NPCDirective] = Field(default_factory=list, description=(
         "Ordered list of NPCs that should respond this turn, with per-NPC guidance. "
         "Empty if no NPC should speak. Soft cap ~sqrt(active NPC count) -- "
@@ -265,8 +264,10 @@ class DMPlan(BaseModel):
     npcs_to_introduce: list[NPCIntroduction] = Field(default_factory=list, description=(
         "New NPCs to create and add to the scene. Empty if no new NPCs are needed."))
     closing_narration: str | None = Field(default=None, description=(
-        "OPTIONAL DM narration AFTER NPCs have spoken (consequences, cliffhangers). Most turns need "
-        "none -- leave None unless the moment genuinely demands a narrative beat."))
+        "OPTIONAL DM narration AFTER NPCs have spoken (consequences, cliffhangers), written as "
+        "PLAYER-READY PROSE in the Narrator's voice. Most turns need none -- leave None unless "
+        "the moment genuinely demands a narrative beat, and never when a responding NPC can "
+        "carry the beat in their own turn."))
     new_world_events: list[str] = Field(default_factory=list, description=(
         "Significant facts or consequences to persist in the world event log. "
         "Empty if nothing noteworthy happened."))
@@ -274,10 +275,11 @@ class DMPlan(BaseModel):
         "DM-only knowledge that should be remembered for future turns "
         "but NEVER revealed to NPCs or the player."))
     adjudication: AdjudicationRuling | None = Field(default=None, description=(
-        "POPULATE ONLY when the intent reading says the player's action needs adjudication: "
-        "your ruling on the action (ruling type, check label, DC, advantage, stakes). "
-        "Dice are rolled deterministically by code after you rule, and your stakes become "
-        "the canon outcome. Null for plain dialogue, trivial actions, and questions."))
+        "POPULATE ONLY when the player's latest message attempts an in-character action whose "
+        "outcome is genuinely uncertain AND consequential: your ruling on the action (ruling "
+        "type, check label, DC, advantage, stakes). Dice are rolled deterministically by code "
+        "after you rule, and your stakes become the canon outcome. Null for plain dialogue, "
+        "trivial actions, and questions."))
     action_outcome: str | None = Field(default=None, description=(
         "How the player's attempted action resolves. When the action was adjudicated, "
         "leave this None -- the ruling's stakes are resolved into the outcome by code "
@@ -325,21 +327,8 @@ class ContinuityVerdict(BaseModel):
 
 
 # ------------------------------------------------------------------
-# Scene memory + faction simulation
+# Faction simulation
 # ------------------------------------------------------------------
-
-class SceneSummary(BaseModel):
-    """Distilled memory of a concluded scene."""
-    scene_summary: str = Field(description="2-4 sentences capturing what happened and why it mattered.")
-    canon_updates: list[str] = Field(default_factory=list, description=(
-        "Discrete facts that became true, one per entry, past tense."))
-    npc_updates: list[str] = Field(default_factory=list, description=(
-        "How named NPCs' attitudes, plans, or circumstances changed."))
-    unresolved_hooks: list[str] = Field(default_factory=list, description=(
-        "Questions raised but unanswered, promises unkept, threats looming."))
-    player_preferences: str | None = Field(default=None, description=(
-        "Clear evidence of what the player enjoys or avoids. Null when unsure."))
-
 
 class FactionSimulation(BaseModel):
     """Offscreen faction moves produced by the faction simulator."""
@@ -362,10 +351,16 @@ class DungeonMasterState(BaseModel):
     messages: Annotated[list[AnyMessage], operator.add]
     plan: DMPlan | None = None
     lore: str = ""
+    # The player's latest message, embedded once by state_loader and reused
+    # by every vector recall this turn (lore, NPC memories, exemplar routing,
+    # stream relevance). None when the embedder failed -- recalls degrade.
+    query_vector: list[float] | None = Field(default=None, exclude=True)
     world_events: str = ""
     secret_knowledge: str = ""
     # Supervisor pipeline
-    intent: IntentReading | None = None
+    # True when the player's latest message is out-of-character (regex or
+    # confident exemplar vote) and the turn short-circuits to the OOC responder.
+    ooc: bool = False
     adjudication: Adjudication | None = None
     continuity_notes: str = ""
     plan_attempts: int = 0
@@ -376,8 +371,5 @@ class DungeonMasterState(BaseModel):
     # Live participant mechanical state (rendered prompt-ready by the context loader)
     player_state: str = "(no tracked mechanical state)"
     active_npc_states: str = "(no tracked mechanical state for active NPCs)"
-    # NPC build negotiation loop (DM <-> npc_builder argument)
+    # NPC introductions waiting on the one-shot builder
     build_queue: list[NPCIntroduction] = Field(default_factory=list)
-    build_transcript: list[AnyMessage] = Field(default_factory=list)
-    build_rounds: int = 0
-    build_created: bool = False

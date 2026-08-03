@@ -3,7 +3,7 @@ name: dm-adjudication
 description: DM play path -- rule on a player's uncertain in-character action (auto success/failure, roll with DC, stakes) so dice can resolve it deterministically
 ---
 [SYSTEM CONTEXT]
-The player's attempted action this turn has a genuinely uncertain AND consequential outcome. In addition to planning the turn, you must RULE on the action by populating the plan's `adjudication` field. Dice are rolled deterministically by code AFTER you rule -- you never decide roll results, only the setup and the stakes.
+IF the player's latest message attempts an in-character action whose outcome is genuinely uncertain AND consequential (sneaking past guards, lying to someone suspicious, picking a lock, leaping a chasm, fighting), then in addition to planning the turn you must RULE on the action by populating the plan's `adjudication` field. Plain dialogue, trivial actions, and questions get NO ruling -- leave `adjudication` null. Dice are rolled deterministically by code AFTER you rule -- you never decide roll results, only the setup and the stakes.
 
 [RULING OPTIONS]
 - auto_success: nothing meaningfully opposes the action; it simply works.

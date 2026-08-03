@@ -1,13 +1,17 @@
 from datetime import datetime, timezone
 from logging import getLogger
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from database.postgres_connection import Base
+from database.postgres_connection import Base, db_session
+from hephaestus.settings import settings
 
 logger = getLogger(__name__)
+
+EMBED_DIM = settings.memory.embed_dim
 
 
 class CharacterDescription(Base):
@@ -94,6 +98,7 @@ class Character(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, index=True, unique=True)
+    embedding = Column(Vector(EMBED_DIM), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -181,9 +186,39 @@ class Character(Base):
     @classmethod
     def exists(cls, name: str) -> bool:
         """Check if a character with this name exists."""
-        from database.postgres_connection import db_session
         with db_session() as s:
             return s.query(cls).filter(cls.name == name).first() is not None
+
+    # ------------------------------------------------------------------
+    # Embedding helpers (semantic NPC dedup)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def embedding_text(name: str, description: str) -> str:
+        """🧬 The exact payload embedded for a character -- keep every write
+        path and the backfill script on this one shape so vectors are
+        comparable."""
+        return f"{name.strip()}\n\n{description.strip()}"
+
+    @classmethod
+    def nearest_by_vector(
+        cls,
+        vector: list[float],
+        top_k: int = 1,
+        exclude_ids: tuple[int, ...] = (),
+    ) -> list[tuple["Character", float]]:
+        """🔍 The top-K closest characters (with embeddings) by L2 distance."""
+        distance = cls.embedding.l2_distance(vector).label("distance")
+        with db_session() as s:
+            query = (
+                s.query(cls, distance)
+                .filter(cls.embedding.isnot(None))
+                .order_by(distance)
+                .limit(top_k)
+            )
+            if exclude_ids:
+                query = query.filter(cls.id.notin_(exclude_ids))
+            return query.all()
 
     def __repr__(self) -> str:
         return f"<Character(id={self.id}, name='{self.name}', desc_v={self.description_version})>"

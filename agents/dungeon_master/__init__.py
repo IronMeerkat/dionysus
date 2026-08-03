@@ -9,7 +9,6 @@ from agents.dungeon_master.schemas import (
     Adjudication,
     DMPlan,
     DungeonMasterState,
-    IntentReading,
     NPCDirective,
     NPCIntroduction,
 )
@@ -18,7 +17,6 @@ __all__ = [
     "Adjudication",
     "DMPlan",
     "DungeonMasterState",
-    "IntentReading",
     "NARRATOR_NAME",
     "NPCDirective",
     "NPCIntroduction",

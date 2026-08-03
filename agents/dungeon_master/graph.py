@@ -2,17 +2,18 @@
 
 Turn pipeline:
 
-    START -> state_loader -> intent_router (+ vector lore recall)
+    START -> state_loader (world state + vector lore recall) -> intent_router
+        (regex/exemplar OOC routing, no LLM)
         -> ooc_responder -> persist_messages            (OOC short-circuit)
         -> dm_planner (adjudication folded in) -> continuity_checker
             -> dm_planner                               (one repair pass)
             -> roll_announcer (compact dice line, rolls only)
-            -> {[npc build loop] || dm_narrator_opening} -> npc_executor
+            -> {[one-shot npc build] || dm_narrator_opening} -> npc_executor
             -> dm_narrator_closing -> canon_manager -> turn_epilogue
         -> persist_messages -> END
 
 One fan-out runs concurrently:
-  - When the plan introduces NPCs, the build negotiation loop runs alongside
+  - When the plan introduces NPCs, the one-shot builder runs alongside
     opening narration; npc_executor is deferred so it starts only after both
     branches finish.
 """
@@ -21,13 +22,13 @@ from logging import getLogger
 import socketio
 from langgraph.graph import END, START, StateGraph
 
-from agents.dungeon_master.builder import after_builder, make_builder_nodes
+from agents.dungeon_master.builder import make_builder_nodes
 from agents.dungeon_master.canon import make_canon_manager, make_persist_messages
-from agents.dungeon_master.classifiers import MAX_PLAN_ATTEMPTS, make_continuity_checker, make_intent_router
+from agents.dungeon_master.classifiers import MAX_PLAN_ATTEMPTS, make_continuity_checker
 from agents.dungeon_master.context import DMContext, make_state_loader
 from agents.dungeon_master.epilogue import make_turn_epilogue
 from agents.dungeon_master.executor import make_npc_executor
-from agents.dungeon_master.intent import make_ooc_responder, route_intent
+from agents.dungeon_master.intent import make_intent_router, make_ooc_responder, route_intent
 from agents.dungeon_master.narration import make_narrator_nodes
 from agents.dungeon_master.planner import make_dm_planner, make_roll_announcer
 from agents.dungeon_master.schemas import DungeonMasterState
@@ -126,8 +127,7 @@ def spawn_dungeon_master(
     graph.add_edge("dm_planner", "continuity_checker")
     graph.add_conditional_edges("continuity_checker", after_continuity, ["dm_planner", "roll_announcer"])
     graph.add_conditional_edges("roll_announcer", _scene_fanout, SCENE_TARGETS)
-    graph.add_conditional_edges("npc_builder_caller", after_builder, ["npc_build_reviewer", "npc_registrar"])
-    graph.add_edge("npc_build_reviewer", "npc_builder_caller")
+    graph.add_edge("npc_builder_caller", "npc_registrar")
     graph.add_conditional_edges("npc_registrar", after_registrar, ["npc_builder_caller", "npc_executor"])
     graph.add_edge("dm_narrator_opening", "npc_executor")
     graph.add_conditional_edges("npc_executor", after_npc_executor, ["dm_narrator_closing", "canon_manager"])
