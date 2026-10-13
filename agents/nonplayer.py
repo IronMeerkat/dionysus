@@ -1,71 +1,43 @@
 import asyncio
 import re
 from logging import getLogger
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph.state import CompiledStateGraph
 
+from agents.dungeon_master.schemas import STREAM_MESSAGE_ID_KEY, STREAM_SPEAKER_KEY
+from database.models import Character as CharacterModel, CharacterMemory
+from hephaestus.agent_architectures import (
+    AgentSwarmState,
+    FailedToSelfCorrect,
+    function_to_graph,
+    message_delta,
+    nudged_agent,
+)
 from hephaestus.settings import settings
-from hephaestus.agent_architectures.retry import nudged_agent
-
-from database.models import Campaign, Character as CharacterModel, CharacterMemory
-from database.models.conversation import Conversation
 from tools.participants import render_participant_state
 from tools.status_effects import character_sheet_by_id
 from utils.llm_models import npc_narration
 from utils.prompts import narrator_prompt_template
 
 if TYPE_CHECKING:
-    from agents.dungeon_master import NPCDirective
+    from agents.dungeon_master.schemas import DMContext
 
 logger = getLogger(__name__)
 
 
-def strip_speaker_prefix(raw: str, name: str) -> str:
-    """Remove any leading '{name}:' speaker labels (repeated, any casing) from narration."""
-    pattern = re.compile(
-        rf"^\s*\**\s*{re.escape(name)}\s*\**\s*:(?:\s*\*+(?=\s|$))?\s*",
+def spawn_npc(character: CharacterModel, ctx: "DMContext") -> CompiledStateGraph:
+    """🎭 Build a self-correcting NPC graph for use inside ``create_dynamic_daisy_chain``."""
+    conv = ctx.conversation
+    other_speakers = [c.name for c in conv.characters if c.id != character.id] + [conv.player.name, "Narrator"]
+    stop = [f"\n{n}:" for n in other_speakers]
+    prefix_re = re.compile(
+        rf"^(?:\s*\**\s*{re.escape(character.name)}\s*\**\s*:(?:\s*\*+(?=\s|$))?\s*)+",
         re.IGNORECASE,
     )
-    content = (raw or "").strip()
-    while (match := pattern.match(content)):
-        content = content[match.end():].strip()
-    return content
-
-
-def spawn_npc_directed(
-    character: CharacterModel,
-    conversation: Conversation,
-    directive: "NPCDirective",
-    query_vector: list[float] | None = None,
-) -> StateGraph:
-    """Build an NPC graph that honors a DM directive.
-
-    The ``directive`` provides ``.guidance`` (what to focus on) and
-    ``.withheld_info`` (facts to avoid revealing). The DM planner has
-    already decided this NPC responds this turn, so there is no veto.
-
-    ``query_vector`` is the turn's precomputed player-message embedding;
-    when present the memory recall reuses it instead of re-embedding.
-    """
-
-    # Sheets/location/background are fetched fresh per spawn (the conversation
-    # is a detached snapshot; its roster supplies ids and names only).
-    campaign = Campaign.get(id=conversation.campaign_id)
-    other_characters = "\n\n\n".join(
-        f"**{c.name}**:\n{character_sheet_by_id(c.id)}"
-        for c in conversation.characters
-        if c.id != character.id
-    )
-    other_speakers = [c.name for c in conversation.characters if c.id != character.id]
-    other_speakers.extend([conversation.player.name, "Narrator"])
-    # Server-side stop sequences end generation the moment the model starts another
-    # participant's turn; nudged_agent below is the safety net for what slips through.
-    stop = [f"\n{n}:" for n in other_speakers]
     foreign_turn = re.compile(
         rf"^\s*\**\s*(?:{'|'.join(map(re.escape, other_speakers))})\s*\**\s*:",
         re.IGNORECASE | re.MULTILINE,
@@ -78,104 +50,82 @@ def spawn_npc_directed(
         f"that begins with another participant's name, and never repeat earlier messages "
         f"from the conversation."
     )
+    turn_ctx: dict[str, str] = {}
+    last_id: str | None = None
 
     def is_valid_turn(message: AIMessage) -> bool:
-        """Non-empty after the speaker label, and no ventriloquized lines for others."""
-        body = strip_speaker_prefix(message.content, character.name)
+        body = prefix_re.sub("", message.content or "").strip()
         return bool(body) and not foreign_turn.search(body)
 
-    withheld_block = "".join(f"\n- {fact}" for fact in directive.withheld_info)
-    if withheld_block:
-        withheld_block = "\n[INFORMATION YOU DO NOT KNOW - never reference these facts]" + withheld_block
-
-    class NPCState(BaseModel):
-        messages: Annotated[list[AnyMessage], add_messages]  # add_messages: nudged_agent removes messages by id
-        lore: str = Field(default="")
-        memories: str = Field(default="")
-        self_state: str = Field(default="", description="This NPC's live mechanical state, rendered prompt-ready.")
-        player_state: str = Field(default="", description="The player character's live mechanical state, rendered prompt-ready.")
-        # Turn-level player-message embedding from the DM state_loader;
-        # reused for memory recall so each NPC skips its own embedder call.
-        query_vector: list[float] | None = Field(default=None, exclude=True)
-
-        @property
-        def combined_messages(self) -> list[AnyMessage]:
-            combo = [*conversation.message_buffer, *self.messages]
-            return combo[-min(settings.context_size, len(combo)):]
-
-        @property
-        def combined_dump(self) -> dict:
-            return {
-                "name": character.name,
-                "description": character_sheet_by_id(character.id) + withheld_block,
-                "other_characters": other_characters,
-                "player": character_sheet_by_id(conversation.player_id),
-                "player_name": conversation.player.name,
-                "location": campaign.location if campaign else "",
-                "story_background": (campaign.story_background if campaign else "") or "",
-                "messages": self.combined_messages,
-                "dm_guidance": directive.guidance,
-                **self.model_dump(exclude={"messages", "query_vector"}),
-            }
-
-    async def context_loader(state: NPCState) -> dict:
-        """🧠 Load this NPC's memories (pgvector recall) and live participant
-        states. Lore and the turn's query vector arrive in the initial state
-        from the DM; the vector is reused for recall when present."""
-        def _participant_states() -> tuple[str, str]:
-            return (
-                render_participant_state(conversation.campaign_id, character.id, character.name),
-                render_participant_state(conversation.campaign_id, conversation.player.id),
-            )
-
-        if state.query_vector is not None:
-            memories_coro = CharacterMemory.recall_by_vector(
-                conversation.campaign_id, character.id, state.query_vector
-            )
-        else:
-            logger.warning(f"⚠️ {character.name}: no turn query vector, embedding for memory recall directly")
-            last_human = next((m for m in reversed(state.messages) if isinstance(m, HumanMessage)), None)
-            query = last_human.content if last_human else character.name
-            memories_coro = CharacterMemory.recall(conversation.campaign_id, character.id, query)
-
-        memories, (self_state, player_state) = await asyncio.gather(
-            memories_coro,
-            asyncio.to_thread(_participant_states),
+    async def npc_narrator(state: AgentSwarmState) -> dict:
+        nonlocal last_id
+        other_characters = "\n\n\n".join(
+            f"**{c.name}**:\n{character_sheet_by_id(c.id)}"
+            for c in conv.characters if c.id != character.id
         )
-        return {
-            "memories": memories,
-            "self_state": self_state,
-            "player_state": player_state,
-            "messages": [],
-        }
-
-    async def npc_narrator(state: NPCState) -> dict:
-        prompt = await narrator_prompt_template.ainvoke(state.combined_dump)
+        prompt = await narrator_prompt_template.ainvoke({
+            "name": character.name,
+            "description": character_sheet_by_id(character.id),
+            "other_characters": other_characters,
+            "player": ctx.player_sheet,
+            "player_name": conv.player.name,
+            "location": ctx.location,
+            "story_background": ctx.story_background,
+            "messages": ctx.combined_messages(state.messages, limit=settings.context_size),
+            "dm_guidance": (ctx.plan.action_outcome or "") if ctx.plan else "",
+            "lore": ctx.lore,
+            "memories": turn_ctx.get("memories", ""),
+            "self_state": turn_ctx.get("self_state", ""),
+            "player_state": ctx.player_state,
+        })
         prefix = f"{character.name}: "
         prompt.messages.append(AIMessage(content=prefix))
-
-        response = await npc_narration.ainvoke(prompt.messages, stop=stop)
-        response.content = prefix + strip_speaker_prefix(response.content, character.name)
+        last_id = str(uuid4())
+        response = await npc_narration.ainvoke(
+            prompt.messages,
+            stop=stop,
+            config={"metadata": {STREAM_MESSAGE_ID_KEY: last_id, STREAM_SPEAKER_KEY: character.name}},
+        )
+        response.content = prefix + prefix_re.sub("", response.content or "").strip()
         response.name = character.name
-        response.id = str(uuid4())
-        # No per-turn memory extraction: lasting memories are distilled once
-        # per scene by the merged scene epilogue (character_memories field).
+        response.id = last_id
         return {"messages": [response]}
 
-    # Narrator is its own graph so retries re-run only the model call, not memory recall.
-    narrator = StateGraph(NPCState)
-    narrator.add_node(npc_narrator)
-    narrator.add_edge(START, "npc_narrator")
-    narrator.add_edge("npc_narrator", END)
+    nudged = nudged_agent(
+        function_to_graph(npc_narrator, name="npc_narrator"),
+        is_valid_turn,
+        nudge_text,
+        max_retries=3,
+    )
 
-    narrator_agent = narrator.compile(name=character.name)
-    narrator_agent.state_schema = NPCState  # nudged_agent reads this off the agent to extend the state
+    async def run_npc(state: AgentSwarmState, config: RunnableConfig | None = None) -> dict:
+        nonlocal last_id
+        last_id = None
+        memories_coro = (
+            CharacterMemory.recall_by_vector(ctx.campaign_id, character.id, ctx.query_vector)
+            if ctx.query_vector is not None
+            else CharacterMemory.recall(ctx.campaign_id, character.id, ctx.last_human_query(state.messages, character.name))
+        )
+        memories, self_state = await asyncio.gather(
+            memories_coro,
+            asyncio.to_thread(render_participant_state, ctx.campaign_id, character.id, character.name),
+        )
+        turn_ctx.update(memories=memories, self_state=self_state)
+        try:
+            res = await nudged.ainvoke({"messages": state.messages}, config)
+            delta = message_delta(state.messages, res["messages"])
+            logger.info(f"🎭 {character.name} produced {len(delta)} message(s)")
+            return {"messages": delta}
+        except FailedToSelfCorrect as exc:
+            logger.exception(f"🔁 {character.name} failed to self-correct")
+            if last_id:
+                await ctx.sink.stream_end(last_id, "")
+            await ctx.sink.error(str(exc))
+            return {"messages": []}
+        except Exception:
+            logger.exception(f"💥 NPC graph failed for '{character.name}'")
+            if last_id:
+                await ctx.sink.stream_end(last_id, "")
+            return {"messages": []}
 
-    graph = StateGraph(NPCState)
-    graph.add_node(context_loader)
-    graph.add_node("narrator", nudged_agent(narrator_agent, is_valid_turn, nudge_text, max_retries=3))
-    graph.add_edge(START, "context_loader")
-    graph.add_edge("context_loader", "narrator")
-    graph.add_edge("narrator", END)
-
-    return graph.compile(name=character.name)
+    return function_to_graph(run_npc, name=character.name)

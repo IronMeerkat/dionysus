@@ -11,9 +11,9 @@ id remap.
 """
 from typing import Any
 
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, SystemMessage, ToolMessageChunk
 
-from agents.dungeon_master.schemas import STREAM_MESSAGE_ID_KEY
+from agents.dungeon_master.schemas import STREAM_MESSAGE_ID_KEY, STREAM_SPEAKER_KEY
 from tests.conftest import FakeSocket, as_stream, failing_stream
 
 NARRATOR = "Narrator"
@@ -189,22 +189,32 @@ async def test_tokens_are_forwarded_verbatim() -> None:
     assert tokens == ["Narrator: The hall is cold."]
 
 
-async def test_npc_and_internal_nodes_are_not_streamed() -> None:
-    """NPC lines and the dice line are emitted by their own nodes.
-
-    The executor and roll announcer narrate directly into the sink, so the pump
-    must ignore them or every such message would be delivered twice.
-    """
+async def test_internal_nodes_are_not_streamed() -> None:
+    """Internal reasoning and router nodes are ignored by the pump."""
     sio = FakeSocket()
     await run(sio, [
-        chunk("npc_narrator", "Sera: Well met."),
-        message("npc_executor", "Sera: Well met."),
-        message("roll_announcer", "Dice: 14 vs DC 12"),
+        chunk("npc_router", "Sera"),
         chunk("use_tools", "{}"),
         chunk("dm_planner", "internal reasoning"),
     ])
 
     assert sio.emissions == []
+
+
+async def test_npc_narrator_streams_with_speaker_and_validator_retracts() -> None:
+    """NPC nodes stream under their character name, and nudged_agent validator retracts rejected attempts."""
+    sio = FakeSocket()
+    await run(sio, [
+        ((), (AIMessageChunk(content="bad"), {"langgraph_node": "npc_narrator", STREAM_MESSAGE_ID_KEY: "m-bad", STREAM_SPEAKER_KEY: "Sera"})),
+        ((), (AIMessage(content="Sera: bad", name="Sera", id="m-bad"), {"langgraph_node": "npc_narrator"})),
+        ((), (SystemMessage(content="nudge", id="n-1"), {"langgraph_node": "validator_node"})),
+        ((), (AIMessageChunk(content="Well met."), {"langgraph_node": "npc_narrator", STREAM_MESSAGE_ID_KEY: "m-good", STREAM_SPEAKER_KEY: "Sera"})),
+        ((), (AIMessage(content="Sera: Well met.", name="Sera", id="m-good"), {"langgraph_node": "npc_narrator"})),
+    ])
+
+    assert sio.emissions[0][1] == {"messageId": "m-bad", "name": "Sera"}
+    assert ("stream_end", {"messageId": "m-bad", "content": ""}, "sid-1") in sio.emissions
+    assert sio.emissions[-1][1] == {"messageId": "m-good", "content": "Well met."}
 
 
 async def test_tool_chunks_are_not_streamed() -> None:
