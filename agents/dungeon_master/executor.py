@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessageChunk, AnyMessage
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import DungeonMasterState
 from agents.nonplayer import spawn_npc_directed
+from hephaestus.agent_architectures.retry import FailedToSelfCorrect
 from contracts.turn_events import TurnSink, strip_speaker_prefix
 
 logger = getLogger(__name__)
@@ -123,6 +124,9 @@ def make_npc_executor(ctx: DMContext):
                 )
                 all_messages.extend(delta)
                 logger.info(f"🎭 {directive.name} produced {len(delta)} message(s)")
+            except FailedToSelfCorrect as exc:
+                logger.exception(f"🔁 {directive.name} failed to self-correct")
+                await ctx.sink.error(str(exc))  # stream only; never appended to messages
             except Exception:
                 logger.exception(f"💥 NPC graph failed for '{directive.name}'")
 

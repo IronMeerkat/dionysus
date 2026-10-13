@@ -1,15 +1,16 @@
 import asyncio
-import operator
 import re
 from logging import getLogger
 from typing import TYPE_CHECKING, Annotated
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 from hephaestus.settings import settings
+from hephaestus.agent_architectures.retry import nudged_agent
 
 from database.models import Campaign, Character as CharacterModel, CharacterMemory
 from database.models.conversation import Conversation
@@ -34,74 +35,6 @@ def strip_speaker_prefix(raw: str, name: str) -> str:
     while (match := pattern.match(content)):
         content = content[match.end():].strip()
     return content
-
-
-def truncate_foreign_turns(content: str, other_speakers: list[str]) -> tuple[str, bool]:
-    """Cut narration at the first line that starts another participant's turn.
-
-    Catches the failure mode where the model 'completes the transcript' instead of
-    writing only its own turn — e.g. replaying the player's message as ``Ariel: ...``
-    or continuing into ``Narrator: ...`` after its own line.
-    """
-    if not other_speakers or not content:
-        return content, False
-    names = "|".join(re.escape(n) for n in other_speakers if n)
-    pattern = re.compile(rf"^\s*\**\s*(?:{names})\s*\**\s*:", re.IGNORECASE | re.MULTILINE)
-    match = pattern.search(content)
-    if match is None:
-        return content, False
-    return content[:match.start()].strip(), True
-
-
-async def narrate_with_retry(
-    prompt,
-    name: str,
-    other_speakers: list[str] | None = None,
-    max_attempts: int = 3,
-) -> tuple[AIMessage | None, str]:
-    """Invoke the narration model, retrying on empty, name-only, or ventriloquized replies.
-
-    The narrator prompt ends with a prefilled ``AIMessage("{name}: ")``; some models
-    occasionally continue it by just re-emitting the name and stopping, or by speaking
-    a turn for another participant (including the player). Foreign turns are truncated;
-    if nothing of the NPC's own remains, the call is retried with a corrective system
-    nudge inserted right before the prefill.
-    """
-    other_speakers = [*(other_speakers or []), "Narrator"]
-    # Server-side stop sequences end generation the moment the model starts
-    # another participant's turn, so ventriloquized replies never get
-    # (expensively) completed. The retry loop below stays as a safety net.
-    stop = [f"\n{name}:" for name in other_speakers]
-    messages = list(prompt.messages)
-    response = None
-    for attempt in range(1, max_attempts + 1):
-        response = await npc_narration.ainvoke(messages, stop=stop)
-        content = strip_speaker_prefix(response.content, name)
-        content, truncated = truncate_foreign_turns(content, other_speakers)
-        if truncated:
-            logger.warning(
-                f"🎭 {name} tried to speak for another participant; truncated their turn "
-                f"(attempt {attempt}/{max_attempts}): {response.content[:120]!r}"
-            )
-        if content:
-            if attempt > 1:
-                logger.info(f"🎭 {name} produced narration on attempt {attempt}")
-            return response, content
-        logger.warning(
-            f"🎭 {name} returned an empty/name-only/ventriloquized narration "
-            f"(attempt {attempt}/{max_attempts}): {response.content[:200]!r}"
-        )
-        nudge = SystemMessage(content=(
-            f"Your previous reply was invalid: it was empty, contained only a speaker "
-            f"label, or spoke a turn on behalf of another participant "
-            f"({', '.join(other_speakers)}). You must now write {name}'s OWN turn only: "
-            f"at least one full sentence of dialogue or *action*, fully in character as "
-            f"{name}. Never write a line that begins with another participant's name, "
-            f"and never repeat earlier messages from the conversation."
-        ))
-        messages = [*messages[:-1], nudge, messages[-1]]
-    logger.error(f"💀 {name} failed to produce narration after {max_attempts} attempts")
-    return response, ""
 
 
 def spawn_npc_directed(
@@ -129,14 +62,34 @@ def spawn_npc_directed(
         if c.id != character.id
     )
     other_speakers = [c.name for c in conversation.characters if c.id != character.id]
-    other_speakers.append(conversation.player.name)
+    other_speakers.extend([conversation.player.name, "Narrator"])
+    # Server-side stop sequences end generation the moment the model starts another
+    # participant's turn; nudged_agent below is the safety net for what slips through.
+    stop = [f"\n{n}:" for n in other_speakers]
+    foreign_turn = re.compile(
+        rf"^\s*\**\s*(?:{'|'.join(map(re.escape, other_speakers))})\s*\**\s*:",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    nudge_text = (
+        f"Your previous reply was invalid: it was empty, contained only a speaker label, or "
+        f"spoke a turn on behalf of another participant ({', '.join(other_speakers)}). "
+        f"You must now write {character.name}'s OWN turn only: at least one full sentence of "
+        f"dialogue or *action*, fully in character as {character.name}. Never write a line "
+        f"that begins with another participant's name, and never repeat earlier messages "
+        f"from the conversation."
+    )
+
+    def is_valid_turn(message: AIMessage) -> bool:
+        """Non-empty after the speaker label, and no ventriloquized lines for others."""
+        body = strip_speaker_prefix(message.content, character.name)
+        return bool(body) and not foreign_turn.search(body)
 
     withheld_block = "".join(f"\n- {fact}" for fact in directive.withheld_info)
     if withheld_block:
         withheld_block = "\n[INFORMATION YOU DO NOT KNOW - never reference these facts]" + withheld_block
 
     class NPCState(BaseModel):
-        messages: Annotated[list[AnyMessage], operator.add]
+        messages: Annotated[list[AnyMessage], add_messages]  # add_messages: nudged_agent removes messages by id
         lore: str = Field(default="")
         memories: str = Field(default="")
         self_state: str = Field(default="", description="This NPC's live mechanical state, rendered prompt-ready.")
@@ -201,24 +154,28 @@ def spawn_npc_directed(
         prefix = f"{character.name}: "
         prompt.messages.append(AIMessage(content=prefix))
 
-        response, content = await narrate_with_retry(prompt, character.name, other_speakers)
-        if not content:
-            logger.error(f"💀 {character.name} skipping turn: no usable narration produced")
-            return {"messages": []}
-
-        response.content = prefix + content
+        response = await npc_narration.ainvoke(prompt.messages, stop=stop)
+        response.content = prefix + strip_speaker_prefix(response.content, character.name)
         response.name = character.name
         response.id = str(uuid4())
         # No per-turn memory extraction: lasting memories are distilled once
         # per scene by the merged scene epilogue (character_memories field).
         return {"messages": [response]}
 
-    graph = StateGraph(NPCState)
-    for node in (context_loader, npc_narrator):
-        graph.add_node(node.__name__, node)
+    # Narrator is its own graph so retries re-run only the model call, not memory recall.
+    narrator = StateGraph(NPCState)
+    narrator.add_node(npc_narrator)
+    narrator.add_edge(START, "npc_narrator")
+    narrator.add_edge("npc_narrator", END)
 
+    narrator_agent = narrator.compile(name=character.name)
+    narrator_agent.state_schema = NPCState  # nudged_agent reads this off the agent to extend the state
+
+    graph = StateGraph(NPCState)
+    graph.add_node(context_loader)
+    graph.add_node("narrator", nudged_agent(narrator_agent, is_valid_turn, nudge_text, max_retries=3))
     graph.add_edge(START, "context_loader")
-    graph.add_edge("context_loader", "npc_narrator")
-    graph.add_edge("npc_narrator", END)
+    graph.add_edge("context_loader", "narrator")
+    graph.add_edge("narrator", END)
 
     return graph.compile(name=character.name)
