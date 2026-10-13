@@ -9,6 +9,7 @@ from agents.dungeon_master.builder import register_character_in_scene
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import Adjudication, DMPlan, DungeonMasterState, NPCIntroduction
 from agents.skills.registry import skill_registry
+from contracts.turn_events import DICE_SPEAKER
 from database.models import Character as CharacterModel
 from database.session_utils import embedder
 from hephaestus.settings import settings
@@ -253,11 +254,10 @@ def make_roll_announcer(ctx: DMContext):
             return {"messages": []}
         line = adjudication.render_roll_line(ctx.player.name)
         message_id = str(uuid4())
-        if ctx.sio is not None and ctx.sid is not None:
-            await ctx.sio.emit("stream_start", {"messageId": message_id, "name": "Dice"}, to=ctx.sid)
-            await ctx.sio.emit("stream_token", {"messageId": message_id, "token": line}, to=ctx.sid)
-            await ctx.sio.emit("stream_end", {"messageId": message_id, "content": line}, to=ctx.sid)
+        await ctx.sink.stream_start(message_id, DICE_SPEAKER)
+        await ctx.sink.stream_token(message_id, line)
+        await ctx.sink.stream_end(message_id, line)
         logger.info(f"🎲 Announcing roll: {line}")
-        return {"messages": [AIMessage(content=line, name="Dice", id=message_id)]}
+        return {"messages": [AIMessage(content=line, name=DICE_SPEAKER, id=message_id)]}
 
     return roll_announcer

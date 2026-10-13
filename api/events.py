@@ -5,8 +5,9 @@ import socketio
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from agents.dungeon_master import NARRATOR_NAME, spawn_dungeon_master
-from api.stream_handler import SocketStreamHandler
+from agents.dungeon_master import spawn_dungeon_master
+from agents.dungeon_master.pump import TurnStreamPump
+from api.sinks import SocketTurnSink
 from database.models.conversation import Conversation
 from database.postgres_connection import db_session
 from hephaestus.langfuse_handler import langfuse_callback_handler
@@ -60,7 +61,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
             window = min(12, len(lc_messages))
             conversation.message_buffer = lc_messages[-window:]
 
-            graph = spawn_dungeon_master(conversation, sio=sio, sid=sid)
+            graph = spawn_dungeon_master(conversation, sink=SocketTurnSink(sio, sid))
 
             await sio.save_session(sid, {
                 "conversation": conversation,
@@ -110,7 +111,7 @@ def register_events(sio: socketio.AsyncServer) -> None:
             return
         if graph is None:
             logger.warning(f"🔄 No graph found for sid={sid}, spawning new graph")
-            graph = spawn_dungeon_master(conversation, sio=sio, sid=sid)
+            graph = spawn_dungeon_master(conversation, sink=SocketTurnSink(sio, sid))
             await sio.save_session(sid, {
                 "conversation": conversation,
                 "graph": graph,
@@ -133,27 +134,15 @@ def register_events(sio: socketio.AsyncServer) -> None:
                 subgraphs=True,
             )
 
-            pre_ai_count = sum(1 for m in conversation.messages if m.role == "ai")
-
-            character_list = [c.name for c in conversation.characters]
-            handler = SocketStreamHandler(sio, sid, character_list)
-            await handler.process(stream)
-
-            # NPC bubbles already stream with the same UUID that gets persisted,
-            # so only DM narrator messages need their ids remapped.
-            if handler.message_ids:
-                new_ai_msgs = [m for m in conversation.messages if m.role == "ai"][pre_ai_count:]
-                narrator_msgs = [m for m in new_ai_msgs if m.speaker_name == NARRATOR_NAME]
-                id_map = [
-                    {"oldId": stream_id, "newId": str(db_msg.id)}
-                    for stream_id, db_msg in zip(handler.message_ids, narrator_msgs)
-                ]
-                if id_map:
-                    await sio.emit("messages_persisted", {"mapping": id_map}, to=sid)
+            # Every bubble streams under the id its row is persisted under --
+            # narrator and OOC nodes mint it before the model call, the NPC
+            # executor and roll announcer reuse theirs -- so there is nothing
+            # left to reconcile client-side after the turn.
+            await TurnStreamPump(SocketTurnSink(sio, sid)).process(stream)
 
             if getattr(conversation, "_npcs_introduced", False):
                 conversation._npcs_introduced = False
-                graph = spawn_dungeon_master(conversation, sio=sio, sid=sid)
+                graph = spawn_dungeon_master(conversation, sink=SocketTurnSink(sio, sid))
                 await sio.save_session(sid, {
                     "conversation": conversation,
                     "graph": graph,

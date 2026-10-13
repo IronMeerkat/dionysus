@@ -14,7 +14,11 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage
 
 from agents.dungeon_master.context import DMContext
-from agents.dungeon_master.schemas import NARRATOR_NAME, DungeonMasterState
+from agents.dungeon_master.schemas import (
+    NARRATOR_NAME,
+    STREAM_MESSAGE_ID_KEY,
+    DungeonMasterState,
+)
 from database.models.routing import LABEL_OOC, LABEL_STORY, RoutingExemplar
 from hephaestus.settings import settings
 from utils.llm_models import dm_ooc_model
@@ -117,10 +121,19 @@ def make_ooc_responder(ctx: DMContext):
         prefix = f"{NARRATOR_NAME}: "
         prompt.messages.append(AIMessage(content=prefix))
 
+        # See narration._narrate: the id is minted up front so the streamed
+        # bubble and the persisted row share it.
+        message_id = str(uuid4())
         try:
-            response = await dm_ooc_model.ainvoke(prompt)
+            response = await dm_ooc_model.ainvoke(
+                prompt,
+                config={"metadata": {STREAM_MESSAGE_ID_KEY: message_id}},
+            )
         except Exception:
             logger.exception("💥 OOC responder failed")
+            # Tokens may already have streamed. Retract the bubble rather than
+            # leave the player reading an answer that is never persisted.
+            await ctx.sink.stream_end(message_id, "")
             return {"messages": []}
 
         content = (response.content or "").strip()
@@ -128,10 +141,11 @@ def make_ooc_responder(ctx: DMContext):
             content = content[len(prefix):].lstrip()
         if not content:
             logger.error("💀 OOC responder produced an empty answer, skipping")
+            await ctx.sink.stream_end(message_id, "")
             return {"messages": []}
 
         logger.info(f"🎙️ OOC answer: {content[:120]}...")
-        msg = AIMessage(content=f"{prefix}{content}", name=NARRATOR_NAME, id=str(uuid4()))
+        msg = AIMessage(content=f"{prefix}{content}", name=NARRATOR_NAME, id=message_id)
         return {"messages": [msg]}
 
     return ooc_responder

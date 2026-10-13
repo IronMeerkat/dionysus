@@ -7,6 +7,12 @@ from pydantic import BaseModel, Field
 
 NARRATOR_NAME = "Narrator"
 
+# Config-metadata key by which a node hands the turn pump the message id it is
+# about to persist, BEFORE the model starts producing tokens. Without it the
+# pump would have to invent a bubble id and the client would need an after-the
+# fact id remap to reconcile it with the persisted row.
+STREAM_MESSAGE_ID_KEY = "dionysus_message_id"
+
 
 # ------------------------------------------------------------------
 # Rules adjudication

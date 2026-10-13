@@ -3,10 +3,11 @@ import asyncio
 from dataclasses import dataclass, field
 from logging import getLogger
 
-import socketio
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agents.dungeon_master.schemas import DungeonMasterState
+from contracts.sinks import NullTurnSink
+from contracts.turn_events import TurnSink
 from database.models import Campaign, DMSecret, PlayerPreference, World, WorldEvent
 from database.models.conversation import Conversation
 from database.models.lore import LoreEntry
@@ -32,8 +33,10 @@ LORE_TOP_K = settings.memory.recall.lore_top_k
 class DMContext:
     """Everything a DM node needs about the session it is running in."""
     conversation: Conversation
-    sio: socketio.AsyncServer | None = None
-    sid: str | None = None
+    # Where this turn's narration goes. Defaults to a sink that discards it, so
+    # headless runs (scripts, evals, tests) take the same code path as live play
+    # instead of branching on whether a client is attached.
+    sink: TurnSink = field(default_factory=NullTurnSink)
 
     # Immutable scalar snapshots captured at construction, so threaded
     # helpers can take plain ints instead of touching ORM objects.

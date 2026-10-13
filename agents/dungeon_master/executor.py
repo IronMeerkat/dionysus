@@ -2,28 +2,27 @@
 from logging import getLogger
 from uuid import uuid4
 
-import socketio
 from langchain_core.messages import AIMessageChunk, AnyMessage
 
 from agents.dungeon_master.context import DMContext
 from agents.dungeon_master.schemas import DungeonMasterState
 from agents.nonplayer import spawn_npc_directed
+from contracts.turn_events import TurnSink, strip_speaker_prefix
 
 logger = getLogger(__name__)
 
 NODE_NARRATOR = "npc_narrator"
 
 
-async def _stream_npc_to_socket(
+async def _stream_npc(
     npc_graph: object,
     input_messages: list[AnyMessage],
     lore: str,
     query_vector: list[float] | None,
     speaker: str,
-    sio: socketio.AsyncServer,
-    sid: str,
+    sink: TurnSink,
 ) -> list[AnyMessage]:
-    """Stream an NPC graph and emit tokens directly to a Socket.IO client.
+    """Stream an NPC graph, narrating its tokens into ``sink``.
 
     Tokens are forwarded live for responsiveness, but the *authoritative* message is
     the cleaned one the npc_narrator node returns (prefix-stripping, foreign-turn
@@ -43,7 +42,7 @@ async def _stream_npc_to_socket(
         nonlocal message_id
         if message_id is None:
             message_id = str(uuid4())
-            await sio.emit("stream_start", {"messageId": message_id, "name": speaker}, to=sid)
+            await sink.stream_start(message_id, speaker)
 
     stream = npc_graph.astream(
         {"messages": input_messages, "lore": lore, "query_vector": query_vector},
@@ -67,7 +66,7 @@ async def _stream_npc_to_socket(
 
         await ensure_started()
         if prefix_stripped:
-            await sio.emit("stream_token", {"messageId": message_id, "token": msg.content}, to=sid)
+            await sink.stream_token(message_id, msg.content)
             continue
 
         # Buffer until the leading "{speaker}: " prefix is either stripped or ruled out.
@@ -76,24 +75,24 @@ async def _stream_npc_to_socket(
             prefix_stripped = True
             flush = prefix_buffer[len(expected):] if prefix_buffer.startswith(expected) else prefix_buffer
             if flush:
-                await sio.emit("stream_token", {"messageId": message_id, "token": flush}, to=sid)
+                await sink.stream_token(message_id, flush)
 
     if not final_messages:
         if message_id is not None:
-            # Narration failed after retries: retract the live bubble.
+            # Narration failed after retries: retract the live bubble. The empty
+            # string is load-bearing -- it tells the client to DROP the bubble,
+            # where omitting content would tell it to keep the partial text.
             logger.warning(f"🗑️ {speaker}: no usable narration, retracting streamed bubble {message_id}")
-            await sio.emit("stream_end", {"messageId": message_id, "content": ""}, to=sid)
+            await sink.stream_end(message_id, "")
         return []
 
     final_msg = final_messages[-1]
-    display_content = final_msg.content
-    if display_content.startswith(f"{speaker}:"):
-        display_content = display_content[len(speaker) + 1:].lstrip()
+    display_content = strip_speaker_prefix(final_msg.content, speaker)
 
     await ensure_started()
     # Reuse the bubble id so the persisted DB row and the frontend agree.
     final_msg.id = message_id
-    await sio.emit("stream_end", {"messageId": message_id, "content": display_content}, to=sid)
+    await sink.stream_end(message_id, display_content)
     return final_messages
 
 
@@ -114,18 +113,14 @@ def make_npc_executor(ctx: DMContext):
             npc_graph = spawn_npc_directed(character, ctx.conversation, directive, state.query_vector)
             input_messages = [*state.messages, *all_messages]
             try:
-                if ctx.sio is not None and ctx.sid is not None:
-                    delta = await _stream_npc_to_socket(
-                        npc_graph, input_messages, state.lore, state.query_vector,
-                        character.name, ctx.sio, ctx.sid,
-                    )
-                else:
-                    result = await npc_graph.ainvoke({
-                        "messages": input_messages,
-                        "lore": state.lore,
-                        "query_vector": state.query_vector,
-                    })
-                    delta = result.get("messages", [])[len(input_messages):]
+                # One path, client attached or not: a headless run narrates into
+                # a null sink. The old no-socket branch called ainvoke and sliced
+                # raw state instead, so it produced different message content
+                # than live play for the same input.
+                delta = await _stream_npc(
+                    npc_graph, input_messages, state.lore, state.query_vector,
+                    character.name, ctx.sink,
+                )
                 all_messages.extend(delta)
                 logger.info(f"🎭 {directive.name} produced {len(delta)} message(s)")
             except Exception:

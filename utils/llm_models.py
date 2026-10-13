@@ -1,11 +1,5 @@
-import copy
-from typing import Any
-
-from langchain_xai import ChatXAI
-
+from hephaestus.model_wrappers import ChatNanoGPT
 from hephaestus.settings import settings
-
-from utils.nanogpt_integration import ChatNanoGPT
 
 models = settings.models
 
@@ -14,30 +8,7 @@ glm = models.glm.model_dump()
 moonshot = models.moonshot.model_dump()
 small_glm = models.small_glm.model_dump()
 
-# def _nano(
-#     *,
-#     thinking_disabled: bool = False,
-#     reasoning_effort: str | None = None,
-#     max_tokens: int | None = None,
-# ) -> dict[str, Any]:
-#     """🪙 Build a tuned nanogpt config for simple/cheap hops.
 
-#     GLM-5.2 defaults to *unbounded* reasoning, which is a costly 7-minute trap
-#     for trivial work. Pass ``thinking_disabled=True`` to skip thinking entirely
-#     (pure classification/detection), or ``reasoning_effort`` to cap it at the
-#     cheapest enabled level. ``max_tokens`` caps the response budget.
-#     """
-#     cfg = copy.deepcopy(nanogpt)
-#     extra = dict(cfg.get("extra_body", {}))
-#     if thinking_disabled:
-#         extra["thinking"] = {"type": "disabled"}
-#     elif reasoning_effort is not None:
-#         extra["thinking"] = {"type": "enabled"}
-#         extra["reasoning_effort"] = reasoning_effort
-#     cfg["extra_body"] = extra
-#     if max_tokens is not None:
-#         cfg["max_tokens"] = max_tokens
-#     return cfg
 
 npc_narration = ChatNanoGPT(**glm)
 # npc_narration = ChatXAI(**models.xai)

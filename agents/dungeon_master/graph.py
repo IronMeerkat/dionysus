@@ -19,7 +19,6 @@ One fan-out runs concurrently:
 """
 from logging import getLogger
 
-import socketio
 from langgraph.graph import END, START, StateGraph
 
 from agents.dungeon_master.builder import make_builder_nodes
@@ -32,6 +31,8 @@ from agents.dungeon_master.intent import make_intent_router, make_ooc_responder,
 from agents.dungeon_master.narration import make_narrator_nodes
 from agents.dungeon_master.planner import make_dm_planner, make_roll_announcer
 from agents.dungeon_master.schemas import DungeonMasterState
+from contracts.sinks import NullTurnSink
+from contracts.turn_events import TurnSink
 from database.models.conversation import Conversation
 
 logger = getLogger(__name__)
@@ -93,11 +94,10 @@ def after_npc_executor(state: DungeonMasterState) -> str:
 
 def spawn_dungeon_master(
     conversation: Conversation,
-    sio: socketio.AsyncServer | None = None,
-    sid: str | None = None,
+    sink: TurnSink | None = None,
     name: str = "dungeon_master",
 ) -> StateGraph:
-    ctx = DMContext(conversation=conversation, sio=sio, sid=sid)
+    ctx = DMContext(conversation=conversation, sink=sink or NullTurnSink())
 
     nodes = {
         "state_loader": make_state_loader(ctx),

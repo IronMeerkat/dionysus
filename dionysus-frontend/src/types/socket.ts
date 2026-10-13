@@ -2,6 +2,10 @@ export interface MessageCreatedPayload {
   messageId: string;
 }
 
+/**
+ * Bubbles are streamed under the id their database row is persisted under, so
+ * `messageId` is stable and safe to use for edit/delete straight away.
+ */
 export interface StreamStartPayload {
   messageId: string;
   name: string;
@@ -24,10 +28,6 @@ export interface StreamEndPayload {
 
 export interface SocketErrorPayload {
   message: string;
-}
-
-export interface MessagesPersistedPayload {
-  mapping: { oldId: string; newId: string }[];
 }
 
 export interface SendMessagePayload {
@@ -55,7 +55,6 @@ export interface ServerToClientEvents {
   stream_start: (payload: StreamStartPayload) => void;
   stream_token: (payload: StreamTokenPayload) => void;
   stream_end: (payload: StreamEndPayload) => void;
-  messages_persisted: (payload: MessagesPersistedPayload) => void;
   session_ready: (payload: SessionReadyPayload) => void;
   error: (payload: SocketErrorPayload) => void;
 }

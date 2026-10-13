@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, Body
 from fastapi.exceptions import HTTPException
 
+from contracts.turn_events import strip_speaker_prefix
 from database.models import Campaign, Character, Conversation
 from database.postgres_connection import db_session
 
@@ -11,13 +12,6 @@ logger = logging.getLogger(__name__)
 session_router = APIRouter(prefix='/session')
 
 _ROLE_MAP = {"human": "user", "ai": "assistant"}
-
-
-def _strip_speaker_prefix(content: str, speaker_name: str | None) -> str:
-    if not speaker_name:
-        return content
-    prefix = f"{speaker_name}: "
-    return content[len(prefix):] if content.startswith(prefix) else content
 
 
 def _conversation_response(conversation: Conversation) -> dict[str, object]:
@@ -29,7 +23,7 @@ def _conversation_response(conversation: Conversation) -> dict[str, object]:
         "messages": [
             {
                 "id": str(msg.id),
-                "content": _strip_speaker_prefix(msg.content, msg.speaker_name),
+                "content": strip_speaker_prefix(msg.content, msg.speaker_name),
                 "role": _ROLE_MAP.get(msg.role, msg.role),
                 "name": msg.speaker_name or "",
                 "created_at": msg.created_at.isoformat(),

@@ -7,7 +7,11 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage
 
 from agents.dungeon_master.context import DMContext
-from agents.dungeon_master.schemas import NARRATOR_NAME, DungeonMasterState
+from agents.dungeon_master.schemas import (
+    NARRATOR_NAME,
+    STREAM_MESSAGE_ID_KEY,
+    DungeonMasterState,
+)
 from utils.llm_models import dm_narrator_model
 from utils.prompts import dm_narrator_prompt_template
 
@@ -33,11 +37,18 @@ def make_narrator_nodes(ctx: DMContext) -> dict:
         prefix = f"{NARRATOR_NAME}: "
         prompt.messages.append(AIMessage(content=prefix))
 
-        response = await dm_narrator_model.ainvoke(prompt)
+        # Mint the id BEFORE the call and announce it on the run's metadata, so
+        # the tokens the pump streams live already carry the id this message is
+        # persisted under.
+        message_id = str(uuid4())
+        response = await dm_narrator_model.ainvoke(
+            prompt,
+            config={"metadata": {STREAM_MESSAGE_ID_KEY: message_id}},
+        )
         content = response.content.strip()
         while content.startswith(prefix):
             content = content[len(prefix):].lstrip()
-        return AIMessage(content=f"{prefix}{content}", name=NARRATOR_NAME, id=str(uuid4()))
+        return AIMessage(content=f"{prefix}{content}", name=NARRATOR_NAME, id=message_id)
 
     async def dm_narrator_opening(state: DungeonMasterState) -> dict:
         """Speak the plan's opening beats; only composite beats pay a call."""

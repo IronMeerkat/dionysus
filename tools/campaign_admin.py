@@ -195,14 +195,8 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         include_closed=true to also see resolved/abandoned threads.
         """
         threads = list_threads(campaign_id, include_closed=include_closed)
-        if not threads:
-            scope = "open" if not include_closed else "all"
-            return f"(no {scope} quest threads)"
-        lines = []
-        for t in threads:
-            note = f" — {t.notes.strip().splitlines()[-1]}" if t.notes.strip() else ""
-            lines.append(f"- [{t.status}] {t.title}{note}")
-        return "\n".join(lines)
+        scope = "all" if include_closed else "open"
+        return render_threads(threads, show_status=True, scope=scope)
 
     @tool
     async def manage_quest_thread(title: str, action: str, note: str = "") -> str:
@@ -440,7 +434,7 @@ def build_campaign_admin_tools(campaign_id: int) -> list:
         if not body:
             return "❌ content is empty, nothing to create."
 
-        character = Character.get(name=name.strip())
+        character = Character.get(name=name)
         if character is None:
             return (
                 f"❌ No character named '{name}' found in the database; "
